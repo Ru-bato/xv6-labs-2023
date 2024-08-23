@@ -23,8 +23,6 @@
 #include "fs.h"
 #include "buf.h"
 
-// #define HASH(id) (id % NBUCKET)
-
 struct {
   struct spinlock lock[NBUCKET];  // for each bucket
   struct buf buf[NBUF];
@@ -41,6 +39,7 @@ HASH(uint id)
 {
   return id % NBUCKET;
 }
+
 void
 binit(void)
 {
