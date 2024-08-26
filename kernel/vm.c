@@ -449,3 +449,47 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+// Recursively print page-table pages.
+void printwalk(pagetable_t pagetable, int depth) {
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    // If the page is valid
+    if(pte & PTE_V){
+      for(int j = 0; j < depth; j++)
+        printf(" ..");
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      printf("%d: pte %p pa %p\n", i, pte, child);
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        // goto lower-level page table
+        printwalk((pagetable_t)child, depth + 1);
+      }
+    }
+  }
+}
+
+void vmprint(pagetable_t pagetable) {
+  printf("page table %p\n", pagetable);
+  printwalk(pagetable, 1);
+}
+
+int vmpgaccess(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+
+  if(va >= MAXVA)
+    return 0;
+
+  pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    return 0;
+  if((*pte & PTE_A) == 0)
+    return 0;
+  else{
+    *pte = *pte & (~PTE_A);
+    return 1;
+  }
+  return 0;
+}

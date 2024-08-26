@@ -75,6 +75,38 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  uint64 ip;
+  int n;
+  int bitmask;
+  // Set an upper limit on the number of pages that can be scanned.
+  const int upper_limit = 32;
+
+  argaddr(0, &ip);
+  if(ip == -1)
+    return -1;
+
+  argint(1, &n);
+  if(n == -1)
+    return -1;
+
+  argint(2, &bitmask);
+  if(bitmask == -1)
+    return -1;
+
+  if(n > upper_limit || n < 0)
+    return -1;
+  
+  int res = 0;
+  struct proc *p = myproc();
+
+  for(int i = 0; i < n; i++){
+    int va = ip + i * PGSIZE;
+    int t = vmpgaccess(p->pagetable, va);
+    res = res | t << i;
+  }
+
+  if(copyout(p->pagetable, bitmask, (char*)&res, sizeof(res)) == -1)
+    return -1;
   return 0;
 }
 #endif
