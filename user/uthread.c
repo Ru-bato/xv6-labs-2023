@@ -10,10 +10,30 @@
 #define STACK_SIZE  8192
 #define MAX_THREAD  4
 
+// Saved registers for kernel context switches.
+struct uthread_context {
+  uint64 ra;
+  uint64 sp;
+
+  // callee-saved
+  uint64 s0;
+  uint64 s1;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+};
 
 struct thread {
-  char       stack[STACK_SIZE]; /* the thread's stack */
-  int        state;             /* FREE, RUNNING, RUNNABLE */
+  char       stack[STACK_SIZE];     /* the thread's stack */
+  int        state;                 /* FREE, RUNNING, RUNNABLE */
+  struct uthread_context context;   /* thread context */
 };
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
@@ -23,8 +43,10 @@ void
 thread_init(void)
 {
   // main() is thread 0, which will make the first invocation to
-  // thread_schedule(). It needs a stack so that the first thread_switch() can
-  // save thread 0's state.
+  // thread_schedule().  it needs a stack so that the first thread_switch() can
+  // save thread 0's state.  thread_schedule() won't run the main thread ever
+  // again, because its state is set to RUNNING, and thread_schedule() selects
+  // a RUNNABLE thread.
   current_thread = &all_thread[0];
   current_thread->state = RUNNING;
 }
@@ -60,6 +82,7 @@ thread_schedule(void)
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
+    thread_switch((uint64)&t->context, (uint64)&next_thread->context);
   } else
     next_thread = 0;
 }
@@ -74,6 +97,8 @@ thread_create(void (*func)())
   }
   t->state = RUNNABLE;
   // YOUR CODE HERE
+  t->context.ra = (uint64)func;
+  t->context.sp = (uint64)(t->stack + STACK_SIZE);  // 指向栈底
 }
 
 void 
@@ -155,7 +180,6 @@ main(int argc, char *argv[])
   thread_create(thread_a);
   thread_create(thread_b);
   thread_create(thread_c);
-  current_thread->state = FREE;
   thread_schedule();
   exit(0);
 }
