@@ -1,0 +1,103 @@
+### Using GDB to Debug xv6 Kernel
+
+This guide will walk you through setting up GDB to debug the xv6 kernel, including setting breakpoints, inspecting variables, and understanding the cause of kernel panics.
+
+#### Step 1: Setting up GDB
+1. **Start xv6 in debug mode**:
+   ```bash
+   make qemu-gdb
+   ```
+   This command starts xv6 with GDB support.
+
+2. **Open another terminal window** and start GDB with:
+   ```bash
+   riscv64-unknown-elf-gdb
+   ```
+   or if you have a different setup, make sure to start the version of GDB that can handle RISC-V binaries.
+
+3. **Connect GDB to xv6**:
+   Inside GDB, connect to xv6 with:
+   ```gdb
+   (gdb) target remote localhost:26000
+   ```
+
+#### Step 2: Setting Breakpoints and Tracing Execution
+1. **Set a breakpoint at the `syscall` function**:
+   ```gdb
+   (gdb) b syscall
+   ```
+   This sets a breakpoint at the start of the `syscall` function, which handles system calls in the xv6 kernel.
+
+2. **Continue execution**:
+   ```gdb
+   (gdb) c
+   ```
+   xv6 will run until it hits the breakpoint at the `syscall` function.
+
+3. **Inspect the function call stack**:
+   ```gdb
+   (gdb) backtrace
+   ```
+   This command shows the stack trace, revealing which function called `syscall`. Based on the xv6 implementation, it's often called from `usertrap()`.
+
+#### Step 3: Examining the Process Structure
+1. **Step through instructions**:
+   Use `n` to step through lines until you pass `struct proc *p = myproc();`.
+
+2. **Inspect the process structure**:
+   ```gdb
+   (gdb) p /x *p
+   ```
+   This command prints the process structure in hexadecimal, showing details like process state, memory, and registers.
+
+3. **Check the system call number**:
+   ```gdb
+   (gdb) p /x p->trapframe->a7
+   ```
+   The value in `a7` corresponds to the system call number. For example, in `user/initcode.S`, the first program sets `a7` to `SYS_exec`, which is likely system call number 7.
+
+#### Step 4: Inspecting CPU Mode
+1. **Check the previous CPU mode**:
+   ```gdb
+   (gdb) p /x $sstatus
+   ```
+   The `sstatus` register reveals the CPU's status. If `sstatus` indicates the previous mode was user mode, then the kernel correctly switched into kernel mode for the system call.
+
+#### Step 5: Diagnosing Kernel Panic
+1. **Modify `syscall` to force a panic**:
+   Replace `num = p->trapframe->a7;` with:
+   ```c
+   num = *(int *)0;  // Force a kernel panic by dereferencing a NULL pointer.
+   ```
+   Rebuild and run xv6:
+   ```bash
+   make qemu
+   ```
+
+2. **Identify the panic source**:
+   When xv6 panics, it prints values such as `sepc` (program counter) and `scause` (cause of the trap). Use `sepc` to find the offending instruction in the assembly code:
+   ```bash
+   grep <sepc_value> kernel/kernel.asm
+   ```
+   This command shows the assembly instruction where the kernel panicked. For example, if `sepc=0x000000008000215a`, find the corresponding line in `kernel.asm`.
+
+3. **Set a breakpoint at the faulting instruction**:
+   ```gdb
+   (gdb) b *0x000000008000215a
+   (gdb) layout asm
+   (gdb) c
+   ```
+   This will confirm that GDB stops at the offending instruction.
+
+4. **Understand why the kernel crashes**:
+   The kernel crashes because it attempts to access address `0`, which is not mapped in the kernel's address space. `scause` confirms a load page fault. Address `0` is typically unmapped to catch such NULL pointer dereferences.
+
+5. **Check which process caused the panic**:
+   ```gdb
+   (gdb) p p->name
+   (gdb) p p->pid
+   ```
+   This prints the name and process ID of the process running when the kernel panicked. This information can help trace which user-space program triggered the fault.
+
+### Conclusion
+These steps provide a solid starting point for debugging xv6 kernel issues using GDB. Understanding how to trace system calls, inspect the process and CPU state, and diagnose kernel panics will greatly assist in navigating and troubleshooting xv6 kernel code.
