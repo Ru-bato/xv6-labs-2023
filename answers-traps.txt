@@ -1,0 +1,67 @@
+To address the questions about RISC-V assembly code and function calls, you can analyze the provided `call.asm` file, which contains the assembly code generated from `user/call.c`. Here’s how you can answer each question:
+
+### 1. Registers Containing Function Arguments
+
+In RISC-V assembly, function arguments are typically passed in registers `a0` to `a7`. Here's a breakdown:
+- **`a0`**: First argument
+- **`a1`**: Second argument
+- **`a2`**: Third argument
+- **`a3`**: Fourth argument
+- **`a4`**: Fifth argument
+- **`a5`**: Sixth argument
+- **`a6`**: Seventh argument
+- **`a7`**: Eighth argument
+
+For example, if `main` makes a call to `printf` with an argument `13`, you should find `13` in one of the `a` registers, often `a0`.
+
+### 2. Calls to Functions `f` and `g`
+
+To locate the calls to functions `f` and `g`:
+- Look for the `jal` or `jalr` instructions in `call.asm`. These are used for jumps and link to functions.
+- The `jal` (Jump and Link) instruction is typically used for function calls, and it saves the return address in the `ra` (return address) register.
+- For `jalr` (Jump and Link Register), it also saves the return address in `ra` but jumps to an address contained in a register.
+
+Search for lines with `jal` or `jalr` followed by the function names `f` and `g`.
+
+### 3. Address of `printf`
+
+The address of `printf` can be found by looking for its label or symbol in the assembly file. It will be an address where `printf` is defined.
+
+### 4. Value in `ra` After `jalr` to `printf`
+
+To find the value in the `ra` register after a `jalr` instruction, look at the value stored in `ra` just after the instruction. This typically involves checking the instruction immediately following the `jalr`.
+
+### 5. Output of the Code
+
+```c
+unsigned int i = 0x00646c72;
+printf("H%x Wo%s", 57616, &i);
+```
+
+- **`0x00646c72`** is the hexadecimal representation of the string "rld" in ASCII.
+- `57616` in hexadecimal is `0xe0c0`, which is equivalent to `57616` in decimal.
+- The format specifier `%x` will print `57616` as `e0c0`.
+- `%s` will print the string starting from the address of `i`, which is "rld".
+
+The output will be:
+
+```
+Hxe0c0 Wo rld
+```
+
+### Big-Endian Conversion
+
+In big-endian, the byte order is reversed. To get the same output:
+
+- Set `i` to `0x726c64` (reversed byte order).
+- `57616` remains unchanged because it’s not affected by endianness.
+
+### 6. Output After `y=` in `printf("x=%d y=%d", 3);`
+
+The code `printf("x=%d y=%d", 3);`:
+- **`x=%d`** prints `3`, so `x` will be `3`.
+- **`y=%d`** expects an argument, but only one is provided. This results in undefined behavior because `printf` will read a value from the stack that is not set.
+
+**Explanation**: The `%d` placeholder for `y` will try to print a value from the stack that doesn't correspond to any specific argument, leading to unpredictable results.
+
+To summarize, you need to inspect `call.asm` to answer specific questions about function arguments, calls, and register values, and test the code snippets to verify the outputs and endianness.
