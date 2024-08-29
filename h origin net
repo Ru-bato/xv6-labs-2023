@@ -1,0 +1,2177 @@
+[33mcommit cfae93475dfb4cb5cfe264f4c029136e1447c262[m[33m ([m[1;36mHEAD -> [m[1;32mnet[m[33m)[m
+Author: Sanjit Bhat <sanjit.bhat@gmail.com>
+Date:   Thu Oct 26 06:44:48 2023 -0400
+
+    net add missing files
+
+[1mdiff --git a/conf/lab.mk b/conf/lab.mk[m
+[1mnew file mode 100644[m
+[1mindex 0000000..26dcd75[m
+[1m--- /dev/null[m
+[1m+++ b/conf/lab.mk[m
+[36m@@ -0,0 +1 @@[m
+[32m+[m[32mLAB=net[m
+[1mdiff --git a/grade-lab-net b/grade-lab-net[m
+[1mnew file mode 100755[m
+[1mindex 0000000..dd193e6[m
+[1m--- /dev/null[m
+[1m+++ b/grade-lab-net[m
+[36m@@ -0,0 +1,43 @@[m
+[32m+[m[32m#!/usr/bin/env python3[m
+[32m+[m
+[32m+[m[32mimport re[m
+[32m+[m[32mimport subprocess[m
+[32m+[m[32mfrom gradelib import *[m
+[32m+[m
+[32m+[m[32mr = Runner(save("xv6.out"))[m
+[32m+[m
+[32m+[m[32m@test(0, "running nettests")[m
+[32m+[m[32mdef test_nettest():[m
+[32m+[m[32m    server = subprocess.Popen(["make", "server"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)[m
+[32m+[m[32m    r.run_qemu(shell_script([[m
+[32m+[m[32m        'nettests'[m
+[32m+[m[32m    ]), timeout=30)[m
+[32m+[m[32m    server.terminate()[m
+[32m+[m[32m    server.communicate()[m
+[32m+[m
+[32m+[m[32m@test(40, "nettest: ping", parent=test_nettest)[m
+[32m+[m[32mdef test_nettest_():[m
+[32m+[m[32m    r.match('^testing ping: OK$')[m
+[32m+[m
+[32m+[m[32m@test(20, "nettest: single process", parent=test_nettest)[m
+[32m+[m[32mdef test_nettest_():[m
+[32m+[m[32m    r.match('^testing single-process pings: OK$')[m
+[32m+[m
+[32m+[m[32m@test(20, "nettest: multi-process", parent=test_nettest)[m
+[32m+[m[32mdef test_nettest_fork_test():[m
+[32m+[m[32m    r.match('^testing multi-process pings: OK$')[m
+[32m+[m
+[32m+[m[32m@test(19, "nettest: DNS", parent=test_nettest)[m
+[32m+[m[32mdef test_nettest_dns_test():[m
+[32m+[m[32m    r.match('^DNS OK$')[m
+[32m+[m
+[32m+[m[32m#@test(10, "answers-net.txt")[m
+[32m+[m[32m#def test_answers():[m
+[32m+[m[32m#    # just a simple sanity check, will be graded manually[m
+[32m+[m[32m#    check_answers("answers-net.txt")[m
+[32m+[m
+[32m+[m[32m@test(1, "time")[m
+[32m+[m[32mdef test_time():[m
+[32m+[m[32m    check_time()[m
+[32m+[m
+[32m+[m[32mrun_tests()[m
+[1mdiff --git a/gradelib.py b/gradelib.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..f0d4934[m
+[1m--- /dev/null[m
+[1m+++ b/gradelib.py[m
+[36m@@ -0,0 +1,628 @@[m
+[32m+[m[32mfrom __future__ import print_function[m
+[32m+[m
+[32m+[m[32mimport sys, os, re, time, socket, select, subprocess, errno, shutil, random, string, json[m
+[32m+[m[32mfrom subprocess import check_call, Popen[m
+[32m+[m[32mfrom optparse import OptionParser[m
+[32m+[m
+[32m+[m[32m__all__ = [][m
+[32m+[m
+[32m+[m[32m##################################################################[m
+[32m+[m[32m# Test structure[m
+[32m+[m[32m#[m
+[32m+[m
+[32m+[m[32m__all__ += ["test", "end_part", "run_tests", "get_current_test"][m
+[32m+[m
+[32m+[m[32mTESTS = [][m
+[32m+[m[32mTOTAL = POSSIBLE = 0[m
+[32m+[m[32mPART_TOTAL = PART_POSSIBLE = 0[m
+[32m+[m[32mCURRENT_TEST = None[m
+[32m+[m[32mGRADES = {}[m
+[32m+[m
+[32m+[m[32mdef test(points, title=None, parent=None):[m
+[32m+[m[32m    """Decorator for declaring test functions.  If title is None, the[m
+[32m+[m[32m    title of the test will be derived from the function name by[m
+[32m+[m[32m    stripping the leading "test_" and replacing underscores with[m
+[32m+[m[32m    spaces."""[m
+[32m+[m
+[32m+[m[32m    def register_test(fn, title=title):[m
+[32m+[m[32m        if not title:[m
+[32m+[m[32m            assert fn.__name__.startswith("test_")[m
+[32m+[m[32m            title = fn.__name__[5:].replace("_", " ")[m
+[32m+[m[32m        if parent:[m
+[32m+[m[32m            title = "  " + title[m
+[32m+[m
+[32m+[m[32m        def run_test():[m
+[32m+[m[32m            global TOTAL, POSSIBLE, CURRENT_TEST, GRADES[m
+[32m+[m
+[32m+[m[32m            # Handle test dependencies[m
+[32m+[m[32m            if run_test.complete:[m
+[32m+[m[32m                return run_test.ok[m
+[32m+[m[32m            run_test.complete = True[m
+[32m+[m[32m            parent_failed = False[m
+[32m+[m[32m            if parent:[m
+[32m+[m[32m                parent_failed = not parent()[m
+[32m+[m
+[32m+[m[32m            # Run the test[m
+[32m+[m[32m            fail = None[m
+[32m+[m[32m            start = time.time()[m
+[32m+[m[32m            CURRENT_TEST = run_test[m
+[32m+[m[32m            sys.stdout.write("== Test %s == " % title)[m
+[32m+[m[32m            if parent:[m
+[32m+[m[32m                sys.stdout.write("\n")[m
+[32m+[m[32m            sys.stdout.flush()[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                if parent_failed:[m
+[32m+[m[32m                    raise AssertionError('Parent failed: %s' % parent.__name__)[m
+[32m+[m[32m                fn()[m
+[32m+[m[32m            except AssertionError as e:[m
+[32m+[m[32m                fail = str(e)[m
+[32m+[m
+[32m+[m[32m            # Display and handle test result[m
+[32m+[m[32m            POSSIBLE += points[m
+[32m+[m[32m            if points:[m
+[32m+[m[32m                print("%s: %s" % (title, \[m
+[32m+[m[32m                    (color("red", "FAIL") if fail else color("green", "OK"))), end=' ')[m
+[32m+[m[32m            if time.time() - start > 0.1:[m
+[32m+[m[32m                print("(%.1fs)" % (time.time() - start), end=' ')[m
+[32m+[m[32m            print()[m
+[32m+[m[32m            if fail:[m
+[32m+[m[32m                print("    %s" % fail.replace("\n", "\n    "))[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                TOTAL += points[m
+[32m+[m[32m            if points:[m
+[32m+[m[32m                GRADES[title] = 0 if fail else points[m
+[32m+[m
+[32m+[m[32m            for callback in run_test.on_finish:[m
+[32m+[m[32m                callback(fail)[m
+[32m+[m[32m            CURRENT_TEST = None[m
+[32m+[m
+[32m+[m[32m            run_test.ok = not fail[m
+[32m+[m[32m            return run_test.ok[m
+[32m+[m
+[32m+[m[32m        # Record test metadata on the test wrapper function[m
+[32m+[m[32m        run_test.__name__ = fn.__name__[m
+[32m+[m[32m        run_test.title = title[m
+[32m+[m[32m        run_test.complete = False[m
+[32m+[m[32m        run_test.ok = False[m
+[32m+[m[32m        run_test.on_finish = [][m
+[32m+[m[32m        TESTS.append(run_test)[m
+[32m+[m[32m        return run_test[m
+[32m+[m[32m    return register_test[m
+[32m+[m
+[32m+[m[32mdef end_part(name):[m
+[32m+[m[32m    def show_part():[m
+[32m+[m[32m        global PART_TOTAL, PART_POSSIBLE[m
+[32m+[m[32m        print("Part %s score: %d/%d" % \[m
+[32m+[m[32m            (name, TOTAL - PART_TOTAL, POSSIBLE - PART_POSSIBLE))[m
+[32m+[m[32m        print()[m
+[32m+[m[32m        PART_TOTAL, PART_POSSIBLE = TOTAL, POSSIBLE[m
+[32m+[m[32m    show_part.title = ""[m
+[32m+[m[32m    TESTS.append(show_part)[m
+[32m+[m
+[32m+[m[32mdef write_results():[m
+[32m+[m[32m    global options[m
+[32m+[m[32m    if not options.results:[m
+[32m+[m[32m        return[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        with open(options.results, "w") as f:[m
+[32m+[m[32m            f.write(json.dumps(GRADES))[m
+[32m+[m[32m    except OSError as e:[m
+[32m+[m[32m        print("Provided a bad results path. Error:", e)[m
+[32m+[m
+[32m+[m[32mdef run_tests():[m
+[32m+[m[32m    """Set up for testing and run the registered test functions."""[m
+[32m+[m
+[32m+[m[32m    # Handle command line[m
+[32m+[m[32m    global options[m
+[32m+[m[32m    parser = OptionParser(usage="usage: %prog [-v] [filters...]")[m
+[32m+[m[32m    parser.add_option("-v", "--verbose", action="store_true",[m
+[32m+[m[32m                      help="print commands")[m
+[32m+[m[32m    parser.add_option("--color", choices=["never", "always", "auto"],[m
+[32m+[m[32m                      default="auto", help="never, always, or auto")[m
+[32m+[m[32m    parser.add_option("--results", help="results file path")[m
+[32m+[m[32m    (options, args) = parser.parse_args()[m
+[32m+[m
+[32m+[m[32m    # Start with a full build to catch build errors[m
+[32m+[m[32m    make()[m
+[32m+[m
+[32m+[m[32m    # Clean the file system if there is one[m
+[32m+[m[32m    reset_fs()[m
+[32m+[m
+[32m+[m[32m    # Run tests[m
+[32m+[m[32m    limit = list(map(str.lower, args))[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        for test in TESTS:[m
+[32m+[m[32m            if not limit or any(l in test.title.lower() for l in limit):[m
+[32m+[m[32m                test()[m
+[32m+[m[32m        if not limit:[m
+[32m+[m[32m            write_results()[m
+[32m+[m[32m            print("Score: %d/%d" % (TOTAL, POSSIBLE))[m
+[32m+[m[32m    except KeyboardInterrupt:[m
+[32m+[m[32m        pass[m
+[32m+[m[32m    if TOTAL < POSSIBLE:[m
+[32m+[m[32m        sys.exit(1)[m
+[32m+[m
+[32m+[m[32mdef get_current_test():[m
+[32m+[m[32m    if not CURRENT_TEST:[m
+[32m+[m[32m        raise RuntimeError("No test is running")[m
+[32m+[m[32m    return CURRENT_TEST[m
+[32m+[m
+[32m+[m[32m##################################################################[m
+[32m+[m[32m# Assertions[m
+[32m+[m[32m#[m
+[32m+[m
+[32m+[m[32m__all__ += ["assert_equal", "assert_lines_match"][m
+[32m+[m
+[32m+[m[32mdef assert_equal(got, expect, msg=""):[m
+[32m+[m[32m    if got == expect:[m
+[32m+[m[32m        return[m
+[32m+[m[32m    if msg:[m
+[32m+[m[32m        msg += "\n"[m
+[32m+[m[32m    raise AssertionError("%sgot:\n  %s\nexpected:\n  %s" %[m
+[32m+[m[32m                         (msg, str(got).replace("\n", "\n  "),[m
+[32m+[m[32m                          str(expect).replace("\n", "\n  ")))[m
+[32m+[m
+[32m+[m[32mdef assert_lines_match(text, *regexps, **kw):[m
+[32m+[m[32m    """Assert that all of regexps match some line in text.  If a 'no'[m
+[32m+[m[32m    keyword argument is given, it must be a list of regexps that must[m
+[32m+[m[32m    *not* match any line in text."""[m
+[32m+[m
+[32m+[m[32m    def assert_lines_match_kw(no=[]):[m
+[32m+[m[32m        return no[m
+[32m+[m[32m    no = assert_lines_match_kw(**kw)[m
+[32m+[m
+[32m+[m[32m    # Check text against regexps[m
+[32m+[m[32m    lines = text.splitlines()[m
+[32m+[m[32m    good = set()[m
+[32m+[m[32m    bad = set()[m
+[32m+[m[32m    for i, line in enumerate(lines):[m
+[32m+[m[32m        if any(re.match(r, line) for r in regexps):[m
+[32m+[m[32m            good.add(i)[m
+[32m+[m[32m            regexps = [r for r in regexps if not re.match(r, line)][m
+[32m+[m[32m        if any(re.match(r, line) for r in no):[m
+[32m+[m[32m            bad.add(i)[m
+[32m+[m
+[32m+[m[32m    if not regexps and not bad:[m
+[32m+[m[32m        return[m
+[32m+[m
+[32m+[m[32m    # We failed; construct an informative failure message[m
+[32m+[m[32m    show = set()[m
+[32m+[m[32m    for lineno in good.union(bad):[m
+[32m+[m[32m        for offset in range(-2, 3):[m
+[32m+[m[32m            show.add(lineno + offset)[m
+[32m+[m[32m    if regexps:[m
+[32m+[m[32m        show.update(n for n in range(len(lines) - 5, len(lines)))[m
+[32m+[m
+[32m+[m[32m    msg = [][m
+[32m+[m[32m    last = -1[m
+[32m+[m[32m    for lineno in sorted(show):[m
+[32m+[m[32m        if 0 <= lineno < len(lines):[m
+[32m+[m[32m            if lineno != last + 1:[m
+[32m+[m[32m                msg.append("...")[m
+[32m+[m[32m            last = lineno[m
+[32m+[m[32m            msg.append("%s %s" % (color("red", "BAD ") if lineno in bad else[m
+[32m+[m[32m                                  color("green", "GOOD") if lineno in good[m
+[32m+[m[32m                                  else "    ",[m
+[32m+[m[32m                                  lines[lineno]))[m
+[32m+[m[32m    if last != len(lines) - 1:[m
+[32m+[m[32m        msg.append("...")[m
+[32m+[m[32m    if bad:[m
+[32m+[m[32m        msg.append("unexpected lines in output")[m
+[32m+[m[32m    for r in regexps:[m
+[32m+[m[32m        msg.append(color("red", "MISSING") + " '%s'" % r)[m
+[32m+[m[32m    raise AssertionError("\n".join(msg))[m
+[32m+[m
+[32m+[m[32m##################################################################[m
+[32m+[m[32m# Utilities[m
+[32m+[m[32m#[m
+[32m+[m
+[32m+[m[32m__all__ += ["make", "maybe_unlink", "reset_fs", "color", "random_str", "check_time", "check_answers"][m
+[32m+[m
+[32m+[m[32mMAKE_TIMESTAMP = 0[m
+[32m+[m
+[32m+[m[32mdef pre_make():[m
+[32m+[m[32m    """Delay prior to running make to ensure file mtimes change."""[m
+[32m+[m[32m    while int(time.time()) == MAKE_TIMESTAMP:[m
+[32m+[m[32m        time.sleep(0.1)[m
+[32m+[m
+[32m+[m[32mdef post_make():[m
+[32m+[m[32m    """Record the time after make completes so that the next run of[m
+[32m+[m[32m    make can be delayed if needed."""[m
+[32m+[m[32m    global MAKE_TIMESTAMP[m
+[32m+[m[32m    MAKE_TIMESTAMP = int(time.time())[m
+[32m+[m
+[32m+[m[32mdef make(*target):[m
+[32m+[m[32m    pre_make()[m
+[32m+[m[32m    if Popen(("make",) + target).wait():[m
+[32m+[m[32m        sys.exit(1)[m
+[32m+[m[32m    post_make()[m
+[32m+[m
+[32m+[m[32mdef show_command(cmd):[m
+[32m+[m[32m    from pipes import quote[m
+[32m+[m[32m    print("\n$", " ".join(map(quote, cmd)))[m
+[32m+[m
+[32m+[m[32mdef maybe_unlink(*paths):[m
+[32m+[m[32m    for path in paths:[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            os.unlink(path)[m
+[32m+[m[32m        except EnvironmentError as e:[m
+[32m+[m[32m            if e.errno != errno.ENOENT:[m
+[32m+[m[32m                raise[m
+[32m+[m
+[32m+[m[32mCOLORS = {"default": "\033[0m", "red": "\033[31m", "green": "\033[32m"}[m
+[32m+[m
+[32m+[m[32mdef color(name, text):[m
+[32m+[m[32m    if options.color == "always" or (options.color == "auto" and os.isatty(1)):[m
+[32m+[m[32m        return COLORS[name] + text + COLORS["default"][m
+[32m+[m[32m    return text[m
+[32m+[m
+[32m+[m[32mdef reset_fs():[m
+[32m+[m[32m    if os.path.exists("obj/fs/clean-fs.img"):[m
+[32m+[m[32m        shutil.copyfile("obj/fs/clean-fs.img", "obj/fs/fs.img")[m
+[32m+[m
+[32m+[m[32mdef random_str(n=8):[m
+[32m+[m[32m    letters = string.ascii_letters + string.digits[m
+[32m+[m[32m    return ''.join(random.choice(letters) for _ in range(n))[m
+[32m+[m
+[32m+[m[32mdef check_time():[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        print("")[m
+[32m+[m[32m        with open('time.txt') as f:[m
+[32m+[m[32m            d = f.read().strip()[m
+[32m+[m[32m            if not re.match(r'^\d+$', d):[m
+[32m+[m[32m                raise AssertionError('time.txt does not contain a single integer (number of hours spent on the lab)')[m
+[32m+[m[32m    except IOError:[m
+[32m+[m[32m        raise AssertionError('Cannot read time.txt')[m
+[32m+[m
+[32m+[m[32mdef check_answers(file, n=10):[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        print("")[m
+[32m+[m[32m        with open(file) as f:[m
+[32m+[m[32m            d = f.read().strip()[m
+[32m+[m[32m            if len(d) < n:[m
+[32m+[m[32m                raise AssertionError('%s does not seem to contain enough text' % file)[m
+[32m+[m[32m    except IOError:[m
+[32m+[m[32m        raise AssertionError('Cannot read %s' % file)[m
+[32m+[m
+[32m+[m
+[32m+[m[32m##################################################################[m
+[32m+[m[32m# Controllers[m
+[32m+[m[32m#[m
+[32m+[m
+[32m+[m[32m__all__ += ["QEMU", "GDBClient"][m
+[32m+[m
+[32m+[m[32mclass QEMU(object):[m
+[32m+[m[32m    _GDBPORT = None[m
+[32m+[m
+[32m+[m[32m    def __init__(self, *make_args):[m
+[32m+[m[32m        # Check that QEMU is not currently running[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            GDBClient(self.get_gdb_port(), timeout=0).close()[m
+[32m+[m[32m        except socket.error:[m
+[32m+[m[32m            pass[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            print("""\[m
+[32m+[m[32mGDB stub found on port %d.[m
+[32m+[m[32mQEMU appears to already be running.  Please exit it if possible or use[m
+[32m+[m[32m'killall qemu' or 'killall qemu.real'.""" % self.get_gdb_port(), file=sys.stderr)[m
+[32m+[m[32m            sys.exit(1)[m
+[32m+[m
+[32m+[m[32m        if options.verbose:[m
+[32m+[m[32m            show_command(("make",) + make_args)[m
+[32m+[m[32m        cmd = ("make", "-s", "--no-print-directory") + make_args[m
+[32m+[m[32m        self.proc = Popen(cmd, stdout=subprocess.PIPE,[m
+[32m+[m[32m                          stderr=subprocess.STDOUT,[m
+[32m+[m[32m                          stdin=subprocess.PIPE)[m
+[32m+[m[32m        # Accumulated output as a string[m
+[32m+[m[32m        self.output = ""[m
+[32m+[m[32m        # Accumulated output as a bytearray[m
+[32m+[m[32m        self.outbytes = bytearray()[m
+[32m+[m[32m        self.on_output = [][m
+[32m+[m
+[32m+[m[32m    @staticmethod[m
+[32m+[m[32m    def get_gdb_port():[m
+[32m+[m[32m        if QEMU._GDBPORT is None:[m
+[32m+[m[32m            p = Popen(["make", "-s", "--no-print-directory", "print-gdbport"],[m
+[32m+[m[32m                      stdout=subprocess.PIPE)[m
+[32m+[m[32m            (out, _) = p.communicate()[m
+[32m+[m[32m            if p.returncode:[m
+[32m+[m[32m                raise RuntimeError([m
+[32m+[m[32m                    "Failed to get gdbport: make exited with %d" %[m
+[32m+[m[32m                    p.returncode)[m
+[32m+[m[32m            QEMU._GDBPORT = int(out)[m
+[32m+[m[32m        return QEMU._GDBPORT[m
+[32m+[m
+[32m+[m[32m    def fileno(self):[m
+[32m+[m[32m        if self.proc:[m
+[32m+[m[32m            return self.proc.stdout.fileno()[m
+[32m+[m
+[32m+[m[32m    def handle_read(self):[m
+[32m+[m[32m        buf = os.read(self.proc.stdout.fileno(), 4096)[m
+[32m+[m[32m        self.outbytes.extend(buf)[m
+[32m+[m[32m        self.output = self.outbytes.decode("utf-8", "replace")[m
+[32m+[m[32m        for callback in self.on_output:[m
+[32m+[m[32m            callback(buf)[m
+[32m+[m[32m        if buf == b"":[m
+[32m+[m[32m            self.wait()[m
+[32m+[m[32m            return[m
+[32m+[m
+[32m+[m[32m    def write(self, buf):[m
+[32m+[m[32m        if isinstance(buf, str):[m
+[32m+[m[32m            buf = buf.encode('utf-8')[m
+[32m+[m[32m        self.proc.stdin.write(buf)[m
+[32m+[m[32m        self.proc.stdin.flush()[m
+[32m+[m
+[32m+[m[32m    def wait(self):[m
+[32m+[m[32m        if self.proc:[m
+[32m+[m[32m            self.proc.wait()[m
+[32m+[m[32m            self.proc = None[m
+[32m+[m
+[32m+[m[32m    def kill(self):[m
+[32m+[m[32m        if self.proc:[m
+[32m+[m[32m            self.proc.terminate()[m
+[32m+[m
+[32m+[m[32mclass GDBClient(object):[m
+[32m+[m[32m    def __init__(self, port, timeout=15):[m
+[32m+[m[32m        start = time.time()[m
+[32m+[m[32m        while True:[m
+[32m+[m[32m            self.sock = socket.socket()[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                self.sock.settimeout(1)[m
+[32m+[m[32m                self.sock.connect(("localhost", port))[m
+[32m+[m[32m                break[m
+[32m+[m[32m            except socket.error:[m
+[32m+[m[32m                if time.time() >= start + timeout:[m
+[32m+[m[32m                    raise[m
+[32m+[m[32m        self.__buf = ""[m
+[32m+[m
+[32m+[m[32m    def fileno(self):[m
+[32m+[m[32m        if self.sock:[m
+[32m+[m[32m            return self.sock.fileno()[m
+[32m+[m
+[32m+[m[32m    def handle_read(self):[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            data = self.sock.recv(4096).decode("ascii", "replace")[m
+[32m+[m[32m        except socket.error:[m
+[32m+[m[32m            data = ""[m
+[32m+[m[32m        if data == "":[m
+[32m+[m[32m            self.sock.close()[m
+[32m+[m[32m            self.sock = None[m
+[32m+[m[32m            return[m
+[32m+[m[32m        self.__buf += data[m
+[32m+[m
+[32m+[m[32m        while True:[m
+[32m+[m[32m            m = re.search(r"\$([^#]*)#[0-9a-zA-Z]{2}", self.__buf)[m
+[32m+[m[32m            if not m:[m
+[32m+[m[32m                break[m
+[32m+[m[32m            pkt = m.group(1)[m
+[32m+[m[32m            self.__buf = self.__buf[m.end():][m
+[32m+[m
+[32m+[m[32m            if pkt.startswith("T05"):[m
+[32m+[m[32m                # Breakpoint[m
+[32m+[m[32m                raise TerminateTest[m
+[32m+[m
+[32m+[m[32m    def __send(self, cmd):[m
+[32m+[m[32m        packet = "$%s#%02x" % (cmd, sum(map(ord, cmd)) % 256)[m
+[32m+[m[32m        self.sock.sendall(packet.encode("ascii"))[m
+[32m+[m
+[32m+[m[32m    def __send_break(self):[m
+[32m+[m[32m        self.sock.sendall(b"\x03")[m
+[32m+[m
+[32m+[m[32m    def close(self):[m
+[32m+[m[32m        if self.sock:[m
+[32m+[m[32m            self.sock.close()[m
+[32m+[m[32m            self.sock = None[m
+[32m+[m
+[32m+[m[32m    def cont(self):[m
+[32m+[m[32m        self.__send("c")[m
+[32m+[m
+[32m+[m[32m    def breakpoint(self, addr):[m
+[32m+[m[32m        self.__send("Z1,%x,1" % addr)[m
+[32m+[m
+[32m+[m
+[32m+[m[32m##################################################################[m
+[32m+[m[32m# QEMU test runner[m
+[32m+[m[32m#[m
+[32m+[m
+[32m+[m[32m__all__ += ["TerminateTest", "Runner"][m
+[32m+[m
+[32m+[m[32mclass TerminateTest(Exception):[m
+[32m+[m[32m    pass[m
+[32m+[m
+[32m+[m[32mclass Runner():[m
+[32m+[m[32m    def __init__(self, *default_monitors):[m
+[32m+[m[32m        self.__default_monitors = default_monitors[m
+[32m+[m
+[32m+[m[32m    def run_qemu(self, *monitors, **kw):[m
+[32m+[m[32m        """Run a QEMU-based test.  monitors should functions that will[m
+[32m+[m[32m        be called with this Runner instance once QEMU and GDB are[m
+[32m+[m[32m        started.  Typically, they should register callbacks that throw[m
+[32m+[m[32m        TerminateTest when stop events occur.  The target_base[m
+[32m+[m[32m        argument gives the make target to run.  The make_args argument[m
+[32m+[m[32m        should be a list of additional arguments to pass to make.  The[m
+[32m+[m[32m        timeout argument bounds how long to run before returning."""[m
+[32m+[m
+[32m+[m[32m        def run_qemu_kw(target_base="qemu", make_args=[], timeout=30):[m
+[32m+[m[32m            return target_base, make_args, timeout[m
+[32m+[m[32m        target_base, make_args, timeout = run_qemu_kw(**kw)[m
+[32m+[m
+[32m+[m[32m        # Start QEMU[m
+[32m+[m[32m        pre_make()[m
+[32m+[m[32m        self.qemu = QEMU(target_base + "-gdb", *make_args)[m
+[32m+[m[32m        self.gdb = None[m
+[32m+[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            # Wait for QEMU to start or make to fail.  This will set[m
+[32m+[m[32m            # self.gdb if QEMU starts.[m
+[32m+[m[32m            self.qemu.on_output = [self.__monitor_start][m
+[32m+[m[32m            self.__react([self.qemu], timeout=90)[m
+[32m+[m[32m            self.qemu.on_output = [][m
+[32m+[m[32m            if self.gdb is None:[m
+[32m+[m[32m                print("Failed to connect to QEMU; output:")[m
+[32m+[m[32m                print(self.qemu.output)[m
+[32m+[m[32m                sys.exit(1)[m
+[32m+[m[32m            post_make()[m
+[32m+[m
+[32m+[m[32m            # QEMU and GDB are up[m
+[32m+[m[32m            self.reactors = [self.qemu, self.gdb][m
+[32m+[m
+[32m+[m[32m            # Start monitoring[m
+[32m+[m[32m            for m in self.__default_monitors + monitors:[m
+[32m+[m[32m                m(self)[m
+[32m+[m
+[32m+[m[32m            # Run and react[m
+[32m+[m[32m            self.gdb.cont()[m
+[32m+[m[32m            self.__react(self.reactors, timeout)[m
+[32m+[m[32m        finally:[m
+[32m+[m[32m            # Shutdown QEMU[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                if self.gdb is None:[m
+[32m+[m[32m                    sys.exit(1)[m
+[32m+[m[32m                self.qemu.kill()[m
+[32m+[m[32m                self.__react(self.reactors, 5)[m
+[32m+[m[32m                self.gdb.close()[m
+[32m+[m[32m                self.qemu.wait()[m
+[32m+[m[32m            except:[m
+[32m+[m[32m                print("""\[m
+[32m+[m[32mFailed to shutdown QEMU.  You might need to 'killall qemu' or[m
+[32m+[m[32m'killall qemu.real'.[m
+[32m+[m[32m""")[m
+[32m+[m[32m                raise[m
+[32m+[m
+[32m+[m[32m    def __monitor_start(self, output):[m
+[32m+[m[32m        if b"\n" in output:[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                self.gdb = GDBClient(self.qemu.get_gdb_port(), timeout=2)[m
+[32m+[m[32m                raise TerminateTest[m
+[32m+[m[32m            except socket.error:[m
+[32m+[m[32m                pass[m
+[32m+[m[32m        if not len(output):[m
+[32m+[m[32m            raise TerminateTest[m
+[32m+[m
+[32m+[m[32m    def __react(self, reactors, timeout):[m
+[32m+[m[32m        deadline = time.time() + timeout[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            while True:[m
+[32m+[m[32m                timeleft = deadline - time.time()[m
+[32m+[m[32m                if timeleft < 0:[m
+[32m+[m[32m                    sys.stdout.write("Timeout! ")[m
+[32m+[m[32m                    sys.stdout.flush()[m
+[32m+[m[32m                    return[m
+[32m+[m
+[32m+[m[32m                rset = [r for r in reactors if r.fileno() is not None][m
+[32m+[m[32m                if not rset:[m
+[32m+[m[32m                    return[m
+[32m+[m
+[32m+[m[32m                rset, _, _ = select.select(rset, [], [], timeleft)[m
+[32m+[m[32m                for reactor in rset:[m
+[32m+[m[32m                    reactor.handle_read()[m
+[32m+[m[32m        except TerminateTest:[m
+[32m+[m[32m            pass[m
+[32m+[m
+[32m+[m[32m    def user_test(self, binary, *monitors, **kw):[m
+[32m+[m[32m        """Run a user test using the specified binary.  Monitors and[m
+[32m+[m[32m        keyword arguments are as for run_qemu.  This runs on a disk[m
+[32m+[m[32m        snapshot unless the keyword argument 'snapshot' is False."""[m
+[32m+[m
+[32m+[m[32m        maybe_unlink("obj/kern/init.o", "obj/kern/kernel")[m
+[32m+[m[32m        if kw.pop("snapshot", True):[m
+[32m+[m[32m            kw.setdefault("make_args", []).append("QEMUEXTRA+=-snapshot")[m
+[32m+[m[32m        self.run_qemu(target_base="run-%s" % binary, *monitors, **kw)[m
+[32m+[m
+[32m+[m[32m    def match(self, *args, **kwargs):[m
+[32m+[m[32m        """Shortcut to call assert_lines_match on the most recent QEMU[m
+[32m+[m[32m        output."""[m
+[32m+[m
+[32m+[m[32m        assert_lines_match(self.qemu.output, *args, **kwargs)[m
+[32m+[m
+[32m+[m[32m##################################################################[m
+[32m+[m[32m# Monitors[m
+[32m+[m[32m#[m
+[32m+[m
+[32m+[m[32m__all__ += ["save", "stop_breakpoint", "call_on_line", "stop_on_line", "shell_script"][m
+[32m+[m
+[32m+[m[32mdef save(path):[m
+[32m+[m[32m    """Return a monitor that writes QEMU's output to path.  If the[m
+[32m+[m[32m    test fails, copy the output to path.test-name."""[m
+[32m+[m
+[32m+[m[32m    def setup_save(runner):[m
+[32m+[m[32m        f.seek(0)[m
+[32m+[m[32m        f.truncate()[m
+[32m+[m[32m        runner.qemu.on_output.append(f.write)[m
+[32m+[m[32m        get_current_test().on_finish.append(save_on_finish)[m
+[32m+[m
+[32m+[m[32m    def save_on_finish(fail):[m
+[32m+[m[32m        f.flush()[m
+[32m+[m[32m        save_path = path + "." + get_current_test().__name__[5:][m
+[32m+[m[32m        if fail:[m
+[32m+[m[32m            shutil.copyfile(path, save_path)[m
+[32m+[m[32m            print("    QEMU output saved to %s" % save_path)[m
+[32m+[m[32m        elif os.path.exists(save_path):[m
+[32m+[m[32m            os.unlink(save_path)[m
+[32m+[m[32m            print("    (Old %s failure log removed)" % save_path)[m
+[32m+[m
+[32m+[m[32m    f = open(path, "wb")[m
+[32m+[m[32m    return setup_save[m
+[32m+[m
+[32m+[m[32mdef stop_breakpoint(addr):[m
+[32m+[m[32m    """Returns a monitor that stops when addr is reached.  addr may be[m
+[32m+[m[32m    a number or the name of a symbol."""[m
+[32m+[m
+[32m+[m[32m    def setup_breakpoint(runner):[m
+[32m+[m[32m        if isinstance(addr, str):[m
+[32m+[m[32m            addrs = [int(sym[:16], 16) for sym in open("kernel/kernel.sym")[m
+[32m+[m[32m                     if sym[17:].strip() == addr][m
+[32m+[m[32m            assert len(addrs), "Symbol %s not found" % addr[m
+[32m+[m[32m            runner.gdb.breakpoint(addrs[0])[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            runner.gdb.breakpoint(addr)[m
+[32m+[m[32m    return setup_breakpoint[m
+[32m+[m
+[32m+[m[32mdef call_on_line(regexp, callback):[m
+[32m+[m[32m    """Returns a monitor that calls 'callback' when QEMU prints a line[m
+[32m+[m[32m    matching 'regexp'."""[m
+[32m+[m
+[32m+[m[32m    def setup_call_on_line(runner):[m
+[32m+[m[32m        buf = bytearray()[m
+[32m+[m[32m        def handle_output(output):[m
+[32m+[m[32m            buf.extend(output)[m
+[32m+[m[32m            while b"\n" in buf:[m
+[32m+[m[32m                line, buf[:] = buf.split(b"\n", 1)[m
+[32m+[m[32m                line = line.decode("utf-8", "replace")[m
+[32m+[m[32m                if re.match(regexp, line):[m
+[32m+[m[32m                    callback(line)[m
+[32m+[m[32m        runner.qemu.on_output.append(handle_output)[m
+[32m+[m[32m    return setup_call_on_line[m
+[32m+[m
+[32m+[m[32mdef stop_on_line(regexp):[m
+[32m+[m[32m    """Returns a monitor that stops when QEMU prints a line matching[m
+[32m+[m[32m    'regexp'."""[m
+[32m+[m
+[32m+[m[32m    def stop(line):[m
+[32m+[m[32m        raise TerminateTest[m
+[32m+[m[32m    return call_on_line(regexp, stop)[m
+[32m+[m
+[32m+[m[32mdef shell_script(script, terminate_match=None):[m
+[32m+[m[32m    """Returns a monitor that plays the script, and stops when the script is[m
+[32m+[m[32m    done executing."""[m
+[32m+[m
+[32m+[m[32m    def setup_call_on_line(runner):[m
+[32m+[m[32m        class context:[m
+[32m+[m[32m            n = 0[m
+[32m+[m[32m            buf = bytearray()[m
+[32m+[m[32m        def handle_output(output):[m
+[32m+[m[32m            context.buf.extend(output)[m
+[32m+[m[32m            if terminate_match is not None:[m
+[32m+[m[32m                if re.match(terminate_match, context.buf.decode('utf-8', 'replace')):[m
+[32m+[m[32m                    raise TerminateTest[m
+[32m+[m[32m            if b'$ ' in context.buf:[m
+[32m+[m[32m                context.buf = bytearray()[m
+[32m+[m[32m                if context.n < len(script):[m
+[32m+[m[32m                    runner.qemu.write(script[context.n])[m
+[32m+[m[32m                    runner.qemu.write('\n')[m
+[32m+[m[32m                    context.n += 1[m
+[32m+[m[32m                else:[m
+[32m+[m[32m                    if terminate_match is None:[m
+[32m+[m[32m                        raise TerminateTest[m
+[32m+[m[32m        runner.qemu.on_output.append(handle_output)[m
+[32m+[m[32m    return setup_call_on_line[m
+[1mdiff --git a/kernel/e1000.c b/kernel/e1000.c[m
+[1mnew file mode 100644[m
+[1mindex 0000000..70a2adf[m
+[1m--- /dev/null[m
+[1m+++ b/kernel/e1000.c[m
+[36m@@ -0,0 +1,129 @@[m
+[32m+[m[32m#include "types.h"[m
+[32m+[m[32m#include "param.h"[m
+[32m+[m[32m#include "memlayout.h"[m
+[32m+[m[32m#include "riscv.h"[m
+[32m+[m[32m#include "spinlock.h"[m
+[32m+[m[32m#include "proc.h"[m
+[32m+[m[32m#include "defs.h"[m
+[32m+[m[32m#include "e1000_dev.h"[m
+[32m+[m[32m#include "net.h"[m
+[32m+[m
+[32m+[m[32m#define TX_RING_SIZE 16[m
+[32m+[m[32mstatic struct tx_desc tx_ring[TX_RING_SIZE] __attribute__((aligned(16)));[m
+[32m+[m[32mstatic struct mbuf *tx_mbufs[TX_RING_SIZE];[m
+[32m+[m
+[32m+[m[32m#define RX_RING_SIZE 16[m
+[32m+[m[32mstatic struct rx_desc rx_ring[RX_RING_SIZE] __attribute__((aligned(16)));[m
+[32m+[m[32mstatic struct mbuf *rx_mbufs[RX_RING_SIZE];[m
+[32m+[m
+[32m+[m[32m// remember where the e1000's registers live.[m
+[32m+[m[32mstatic volatile uint32 *regs;[m
+[32m+[m
+[32m+[m[32mstruct spinlock e1000_lock;[m
+[32m+[m
+[32m+[m[32m// called by pci_init().[m
+[32m+[m[32m// xregs is the memory address at which the[m
+[32m+[m[32m// e1000's registers are mapped.[m
+[32m+[m[32mvoid[m
+[32m+[m[32me1000_init(uint32 *xregs)[m
+[32m+[m[32m{[m
+[32m+[m[32m  int i;[m
+[32m+[m
+[32m+[m[32m  initlock(&e1000_lock, "e1000");[m
+[32m+[m
+[32m+[m[32m  regs = xregs;[m
+[32m+[m
+[32m+[m[32m  // Reset the device[m
+[32m+[m[32m  regs[E1000_IMS] = 0; // disable interrupts[m
+[32m+[m[32m  regs[E1000_CTL] |= E1000_CTL_RST;[m
+[32m+[m[32m  regs[E1000_IMS] = 0; // redisable interrupts[m
+[32m+[m[32m  __sync_synchronize();[m
+[32m+[m
+[32m+[m[32m  // [E1000 14.5] Transmit initialization[m
+[32m+[m[32m  memset(tx_ring, 0, sizeof(tx_ring));[m
+[32m+[m[32m  for (i = 0; i < TX_RING_SIZE; i++) {[m
+[32m+[m[32m    tx_ring[i].status = E1000_TXD_STAT_DD;[m
+[32m+[m[32m    tx_mbufs[i] = 0;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  regs[E1000_TDBAL] = (uint64) tx_ring;[m
+[32m+[m[32m  if(sizeof(tx_ring) % 128 != 0)[m
+[32m+[m[32m    panic("e1000");[m
+[32m+[m[32m  regs[E1000_TDLEN] = sizeof(tx_ring);[m
+[32m+[m[32m  regs[E1000_TDH] = regs[E1000_TDT] = 0;[m
+[32m+[m[41m  [m
+[32m+[m[32m  // [E1000 14.4] Receive initialization[m
+[32m+[m[32m  memset(rx_ring, 0, sizeof(rx_ring));[m
+[32m+[m[32m  for (i = 0; i < RX_RING_SIZE; i++) {[m
+[32m+[m[32m    rx_mbufs[i] = mbufalloc(0);[m
+[32m+[m[32m    if (!rx_mbufs[i])[m
+[32m+[m[32m      panic("e1000");[m
+[32m+[m[32m    rx_ring[i].addr = (uint64) rx_mbufs[i]->head;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  regs[E1000_RDBAL] = (uint64) rx_ring;[m
+[32m+[m[32m  if(sizeof(rx_ring) % 128 != 0)[m
+[32m+[m[32m    panic("e1000");[m
+[32m+[m[32m  regs[E1000_RDH] = 0;[m
+[32m+[m[32m  regs[E1000_RDT] = RX_RING_SIZE - 1;[m
+[32m+[m[32m  regs[E1000_RDLEN] = sizeof(rx_ring);[m
+[32m+[m
+[32m+[m[32m  // filter by qemu's MAC address, 52:54:00:12:34:56[m
+[32m+[m[32m  regs[E1000_RA] = 0x12005452;[m
+[32m+[m[32m  regs[E1000_RA+1] = 0x5634 | (1<<31);[m
+[32m+[m[32m  // multicast table[m
+[32m+[m[32m  for (int i = 0; i < 4096/32; i++)[m
+[32m+[m[32m    regs[E1000_MTA + i] = 0;[m
+[32m+[m
+[32m+[m[32m  // transmitter control bits.[m
+[32m+[m[32m  regs[E1000_TCTL] = E1000_TCTL_EN |  // enable[m
+[32m+[m[32m    E1000_TCTL_PSP |                  // pad short packets[m
+[32m+[m[32m    (0x10 << E1000_TCTL_CT_SHIFT) |   // collision stuff[m
+[32m+[m[32m    (0x40 << E1000_TCTL_COLD_SHIFT);[m
+[32m+[m[32m  regs[E1000_TIPG] = 10 | (8<<10) | (6<<20); // inter-pkt gap[m
+[32m+[m
+[32m+[m[32m  // receiver control bits.[m
+[32m+[m[32m  regs[E1000_RCTL] = E1000_RCTL_EN | // enable receiver[m
+[32m+[m[32m    E1000_RCTL_BAM |                 // enable broadcast[m
+[32m+[m[32m    E1000_RCTL_SZ_2048 |             // 2048-byte rx buffers[m
+[32m+[m[32m    E1000_RCTL_SECRC;                // strip CRC[m
+[32m+[m[41m  [m
+[32m+[m[32m  // ask e1000 for receive interrupts.[m
+[32m+[m[32m  regs[E1000_RDTR] = 0; // interrupt after every received packet (no timer)[m
+[32m+[m[32m  regs[E1000_RADV] = 0; // interrupt after every packet (no timer)[m
+[32m+[m[32m  regs[E1000_IMS] = (1 << 7); // RXDW -- Receiver Descriptor Write Back[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mint[m
+[32m+[m[32me1000_transmit(struct mbuf *m)[m
+[32m+[m[32m{[m
+[32m+[m[32m  //[m
+[32m+[m[32m  // Your code here.[m
+[32m+[m[32m  //[m
+[32m+[m[32m  // the mbuf contains an ethernet frame; program it into[m
+[32m+[m[32m  // the TX descriptor ring so that the e1000 sends it. Stash[m
+[32m+[m[32m  // a pointer so that it can be freed after sending.[m
+[32m+[m[32m  //[m
+[32m+[m[41m  [m
+[32m+[m[32m  return 0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mstatic void[m
+[32m+[m[32me1000_recv(void)[m
+[32m+[m[32m{[m
+[32m+[m[32m  //[m
+[32m+[m[32m  // Your code here.[m
+[32m+[m[32m  //[m
+[32m+[m[32m  // Check for packets that have arrived from the e1000[m
+[32m+[m[32m  // Create and deliver an mbuf for each packet (using net_rx()).[m
+[32m+[m[32m  //[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mvoid[m
+[32m+[m[32me1000_intr(void)[m
+[32m+[m[32m{[m
+[32m+[m[32m  // tell the e1000 we've seen this interrupt;[m
+[32m+[m[32m  // without this the e1000 won't raise any[m
+[32m+[m[32m  // further interrupts.[m
+[32m+[m[32m  regs[E1000_ICR] = 0xffffffff;[m
+[32m+[m
+[32m+[m[32m  e1000_recv();[m
+[32m+[m[32m}[m
+[1mdiff --git a/kernel/e1000_dev.h b/kernel/e1000_dev.h[m
+[1mnew file mode 100644[m
+[1mindex 0000000..9b462df[m
+[1m--- /dev/null[m
+[1m+++ b/kernel/e1000_dev.h[m
+[36m@@ -0,0 +1,125 @@[m
+[32m+[m[32m//[m
+[32m+[m[32m// E1000 hardware definitions: registers and DMA ring format.[m
+[32m+[m[32m// from the Intel 82540EP/EM &c manual.[m
+[32m+[m[32m//[m
+[32m+[m
+[32m+[m[32m/* Registers */[m
+[32m+[m[32m#define E1000_CTL      (0x00000/4)  /* Device Control Register - RW */[m
+[32m+[m[32m#define E1000_ICR      (0x000C0/4)  /* Interrupt Cause Read - R */[m
+[32m+[m[32m#define E1000_IMS      (0x000D0/4)  /* Interrupt Mask Set - RW */[m
+[32m+[m[32m#define E1000_RCTL     (0x00100/4)  /* RX Control - RW */[m
+[32m+[m[32m#define E1000_TCTL     (0x00400/4)  /* TX Control - RW */[m
+[32m+[m[32m#define E1000_TIPG     (0x00410/4)  /* TX Inter-packet gap -RW */[m
+[32m+[m[32m#define E1000_RDBAL    (0x02800/4)  /* RX Descriptor Base Address Low - RW */[m
+[32m+[m[32m#define E1000_RDTR     (0x02820/4)  /* RX Delay Timer */[m
+[32m+[m[32m#define E1000_RADV     (0x0282C/4)  /* RX Interrupt Absolute Delay Timer */[m
+[32m+[m[32m#define E1000_RDH      (0x02810/4)  /* RX Descriptor Head - RW */[m
+[32m+[m[32m#define E1000_RDT      (0x02818/4)  /* RX Descriptor Tail - RW */[m
+[32m+[m[32m#define E1000_RDLEN    (0x02808/4)  /* RX Descriptor Length - RW */[m
+[32m+[m[32m#define E1000_RSRPD    (0x02C00/4)  /* RX Small Packet Detect Interrupt */[m
+[32m+[m[32m#define E1000_TDBAL    (0x03800/4)  /* TX Descriptor Base Address Low - RW */[m
+[32m+[m[32m#define E1000_TDLEN    (0x03808/4)  /* TX Descriptor Length - RW */[m
+[32m+[m[32m#define E1000_TDH      (0x03810/4)  /* TX Descriptor Head - RW */[m
+[32m+[m[32m#define E1000_TDT      (0x03818/4)  /* TX Descripotr Tail - RW */[m
+[32m+[m[32m#define E1000_MTA      (0x05200/4)  /* Multicast Table Array - RW Array */[m
+[32m+[m[32m#define E1000_RA       (0x05400/4)  /* Receive Address - RW Array */[m
+[32m+[m
+[32m+[m[32m/* Device Control */[m
+[32m+[m[32m#define E1000_CTL_SLU     0x00000040    /* set link up */[m
+[32m+[m[32m#define E1000_CTL_FRCSPD  0x00000800    /* force speed */[m
+[32m+[m[32m#define E1000_CTL_FRCDPLX 0x00001000    /* force duplex */[m
+[32m+[m[32m#define E1000_CTL_RST     0x00400000    /* full reset */[m
+[32m+[m
+[32m+[m[32m/* Transmit Control */[m
+[32m+[m[32m#define E1000_TCTL_RST    0x00000001    /* software reset */[m
+[32m+[m[32m#define E1000_TCTL_EN     0x00000002    /* enable tx */[m
+[32m+[m[32m#define E1000_TCTL_BCE    0x00000004    /* busy check enable */[m
+[32m+[m[32m#define E1000_TCTL_PSP    0x00000008    /* pad short packets */[m
+[32m+[m[32m#define E1000_TCTL_CT     0x00000ff0    /* collision threshold */[m
+[32m+[m[32m#define E1000_TCTL_CT_SHIFT 4[m
+[32m+[m[32m#define E1000_TCTL_COLD   0x003ff000    /* collision distance */[m
+[32m+[m[32m#define E1000_TCTL_COLD_SHIFT 12[m
+[32m+[m[32m#define E1000_TCTL_SWXOFF 0x00400000    /* SW Xoff transmission */[m
+[32m+[m[32m#define E1000_TCTL_PBE    0x00800000    /* Packet Burst Enable */[m
+[32m+[m[32m#define E1000_TCTL_RTLC   0x01000000    /* Re-transmit on late collision */[m
+[32m+[m[32m#define E1000_TCTL_NRTU   0x02000000    /* No Re-transmit on underrun */[m
+[32m+[m[32m#define E1000_TCTL_MULR   0x10000000    /* Multiple request support */[m
+[32m+[m
+[32m+[m[32m/* Receive Control */[m
+[32m+[m[32m#define E1000_RCTL_RST            0x00000001    /* Software reset */[m
+[32m+[m[32m#define E1000_RCTL_EN             0x00000002    /* enable */[m
+[32m+[m[32m#define E1000_RCTL_SBP            0x00000004    /* store bad packet */[m
+[32m+[m[32m#define E1000_RCTL_UPE            0x00000008    /* unicast promiscuous enable */[m
+[32m+[m[32m#define E1000_RCTL_MPE            0x00000010    /* multicast promiscuous enab */[m
+[32m+[m[32m#define E1000_RCTL_LPE            0x00000020    /* long packet enable */[m
+[32m+[m[32m#define E1000_RCTL_LBM_NO         0x00000000    /* no loopback mode */[m
+[32m+[m[32m#define E1000_RCTL_LBM_MAC        0x00000040    /* MAC loopback mode */[m
+[32m+[m[32m#define E1000_RCTL_LBM_SLP        0x00000080    /* serial link loopback mode */[m
+[32m+[m[32m#define E1000_RCTL_LBM_TCVR       0x000000C0    /* tcvr loopback mode */[m
+[32m+[m[32m#define E1000_RCTL_DTYP_MASK      0x00000C00    /* Descriptor type mask */[m
+[32m+[m[32m#define E1000_RCTL_DTYP_PS        0x00000400    /* Packet Split descriptor */[m
+[32m+[m[32m#define E1000_RCTL_RDMTS_HALF     0x00000000    /* rx desc min threshold size */[m
+[32m+[m[32m#define E1000_RCTL_RDMTS_QUAT     0x00000100    /* rx desc min threshold size */[m
+[32m+[m[32m#define E1000_RCTL_RDMTS_EIGTH    0x00000200    /* rx desc min threshold size */[m
+[32m+[m[32m#define E1000_RCTL_MO_SHIFT       12            /* multicast offset shift */[m
+[32m+[m[32m#define E1000_RCTL_MO_0           0x00000000    /* multicast offset 11:0 */[m
+[32m+[m[32m#define E1000_RCTL_MO_1           0x00001000    /* multicast offset 12:1 */[m
+[32m+[m[32m#define E1000_RCTL_MO_2           0x00002000    /* multicast offset 13:2 */[m
+[32m+[m[32m#define E1000_RCTL_MO_3           0x00003000    /* multicast offset 15:4 */[m
+[32m+[m[32m#define E1000_RCTL_MDR            0x00004000    /* multicast desc ring 0 */[m
+[32m+[m[32m#define E1000_RCTL_BAM            0x00008000    /* broadcast enable */[m
+[32m+[m[32m/* these buffer sizes are valid if E1000_RCTL_BSEX is 0 */[m
+[32m+[m[32m#define E1000_RCTL_SZ_2048        0x00000000    /* rx buffer size 2048 */[m
+[32m+[m[32m#define E1000_RCTL_SZ_1024        0x00010000    /* rx buffer size 1024 */[m
+[32m+[m[32m#define E1000_RCTL_SZ_512         0x00020000    /* rx buffer size 512 */[m
+[32m+[m[32m#define E1000_RCTL_SZ_256         0x00030000    /* rx buffer size 256 */[m
+[32m+[m[32m/* these buffer sizes are valid if E1000_RCTL_BSEX is 1 */[m
+[32m+[m[32m#define E1000_RCTL_SZ_16384       0x00010000    /* rx buffer size 16384 */[m
+[32m+[m[32m#define E1000_RCTL_SZ_8192        0x00020000    /* rx buffer size 8192 */[m
+[32m+[m[32m#define E1000_RCTL_SZ_4096        0x00030000    /* rx buffer size 4096 */[m
+[32m+[m[32m#define E1000_RCTL_VFE            0x00040000    /* vlan filter enable */[m
+[32m+[m[32m#define E1000_RCTL_CFIEN          0x00080000    /* canonical form enable */[m
+[32m+[m[32m#define E1000_RCTL_CFI            0x00100000    /* canonical form indicator */[m
+[32m+[m[32m#define E1000_RCTL_DPF            0x00400000    /* discard pause frames */[m
+[32m+[m[32m#define E1000_RCTL_PMCF           0x00800000    /* pass MAC control frames */[m
+[32m+[m[32m#define E1000_RCTL_BSEX           0x02000000    /* Buffer size extension */[m
+[32m+[m[32m#define E1000_RCTL_SECRC          0x04000000    /* Strip Ethernet CRC */[m
+[32m+[m[32m#define E1000_RCTL_FLXBUF_MASK    0x78000000    /* Flexible buffer size */[m
+[32m+[m[32m#define E1000_RCTL_FLXBUF_SHIFT   27            /* Flexible buffer shift */[m
+[32m+[m
+[32m+[m[32m#define DATA_MAX 1518[m
+[32m+[m
+[32m+[m[32m/* Transmit Descriptor command definitions [E1000 3.3.3.1] */[m
+[32m+[m[32m#define E1000_TXD_CMD_EOP    0x01 /* End of Packet */[m
+[32m+[m[32m#define E1000_TXD_CMD_RS     0x08 /* Report Status */[m
+[32m+[m
+[32m+[m[32m/* Transmit Descriptor status definitions [E1000 3.3.3.2] */[m
+[32m+[m[32m#define E1000_TXD_STAT_DD    0x00000001 /* Descriptor Done */[m
+[32m+[m
+[32m+[m[32m// [E1000 3.3.3][m
+[32m+[m[32mstruct tx_desc[m
+[32m+[m[32m{[m
+[32m+[m[32m  uint64 addr;[m
+[32m+[m[32m  uint16 length;[m
+[32m+[m[32m  uint8 cso;[m
+[32m+[m[32m  uint8 cmd;[m
+[32m+[m[32m  uint8 status;[m
+[32m+[m[32m  uint8 css;[m
+[32m+[m[32m  uint16 special;[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32m/* Receive Descriptor bit definitions [E1000 3.2.3.1] */[m
+[32m+[m[32m#define E1000_RXD_STAT_DD       0x01    /* Descriptor Done */[m
+[32m+[m[32m#define E1000_RXD_STAT_EOP      0x02    /* End of Packet */[m
+[32m+[m
+[32m+[m[32m// [E1000 3.2.3][m
+[32m+[m[32mstruct rx_desc[m
+[32m+[m[32m{[m
+[32m+[m[32m  uint64 addr;       /* Address of the descriptor's data buffer */[m
+[32m+[m[32m  uint16 length;     /* Length of data DMAed into data buffer */[m
+[32m+[m[32m  uint16 csum;       /* Packet checksum */[m
+[32m+[m[32m  uint8 status;      /* Descriptor status */[m
+[32m+[m[32m  uint8 errors;      /* Descriptor Errors */[m
+[32m+[m[32m  uint16 special;[m
+[32m+[m[32m};[m
+[32m+[m
+[1mdiff --git a/kernel/net.c b/kernel/net.c[m
+[1mnew file mode 100644[m
+[1mindex 0000000..137ea2b[m
+[1m--- /dev/null[m
+[1m+++ b/kernel/net.c[m
+[36m@@ -0,0 +1,374 @@[m
+[32m+[m[32m//[m
+[32m+[m[32m// networking protocol support (IP, UDP, ARP, etc.).[m
+[32m+[m[32m//[m
+[32m+[m
+[32m+[m[32m#include "types.h"[m
+[32m+[m[32m#include "param.h"[m
+[32m+[m[32m#include "memlayout.h"[m
+[32m+[m[32m#include "riscv.h"[m
+[32m+[m[32m#include "spinlock.h"[m
+[32m+[m[32m#include "proc.h"[m
+[32m+[m[32m#include "net.h"[m
+[32m+[m[32m#include "defs.h"[m
+[32m+[m
+[32m+[m[32mstatic uint32 local_ip = MAKE_IP_ADDR(10, 0, 2, 15); // qemu's idea of the guest IP[m
+[32m+[m[32mstatic uint8 local_mac[ETHADDR_LEN] = { 0x52, 0x54, 0x00, 0x12, 0x34, 0x56 };[m
+[32m+[m[32mstatic uint8 broadcast_mac[ETHADDR_LEN] = { 0xFF, 0XFF, 0XFF, 0XFF, 0XFF, 0XFF };[m
+[32m+[m
+[32m+[m[32m// Strips data from the start of the buffer and returns a pointer to it.[m
+[32m+[m[32m// Returns 0 if less than the full requested length is available.[m
+[32m+[m[32mchar *[m
+[32m+[m[32mmbufpull(struct mbuf *m, unsigned int len)[m
+[32m+[m[32m{[m
+[32m+[m[32m  char *tmp = m->head;[m
+[32m+[m[32m  if (m->len < len)[m
+[32m+[m[32m    return 0;[m
+[32m+[m[32m  m->len -= len;[m
+[32m+[m[32m  m->head += len;[m
+[32m+[m[32m  return tmp;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Prepends data to the beginning of the buffer and returns a pointer to it.[m
+[32m+[m[32mchar *[m
+[32m+[m[32mmbufpush(struct mbuf *m, unsigned int len)[m
+[32m+[m[32m{[m
+[32m+[m[32m  m->head -= len;[m
+[32m+[m[32m  if (m->head < m->buf)[m
+[32m+[m[32m    panic("mbufpush");[m
+[32m+[m[32m  m->len += len;[m
+[32m+[m[32m  return m->head;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Appends data to the end of the buffer and returns a pointer to it.[m
+[32m+[m[32mchar *[m
+[32m+[m[32mmbufput(struct mbuf *m, unsigned int len)[m
+[32m+[m[32m{[m
+[32m+[m[32m  char *tmp = m->head + m->len;[m
+[32m+[m[32m  m->len += len;[m
+[32m+[m[32m  if (m->len > MBUF_SIZE)[m
+[32m+[m[32m    panic("mbufput");[m
+[32m+[m[32m  return tmp;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Strips data from the end of the buffer and returns a pointer to it.[m
+[32m+[m[32m// Returns 0 if less than the full requested length is available.[m
+[32m+[m[32mchar *[m
+[32m+[m[32mmbuftrim(struct mbuf *m, unsigned int len)[m
+[32m+[m[32m{[m
+[32m+[m[32m  if (len > m->len)[m
+[32m+[m[32m    return 0;[m
+[32m+[m[32m  m->len -= len;[m
+[32m+[m[32m  return m->head + m->len;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Allocates a packet buffer.[m
+[32m+[m[32mstruct mbuf *[m
+[32m+[m[32mmbufalloc(unsigned int headroom)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct mbuf *m;[m
+[32m+[m[41m [m
+[32m+[m[32m  if (headroom > MBUF_SIZE)[m
+[32m+[m[32m    return 0;[m
+[32m+[m[32m  m = kalloc();[m
+[32m+[m[32m  if (m == 0)[m
+[32m+[m[32m    return 0;[m
+[32m+[m[32m  m->next = 0;[m
+[32m+[m[32m  m->head = (char *)m->buf + headroom;[m
+[32m+[m[32m  m->len = 0;[m
+[32m+[m[32m  memset(m->buf, 0, sizeof(m->buf));[m
+[32m+[m[32m  return m;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Frees a packet buffer.[m
+[32m+[m[32mvoid[m
+[32m+[m[32mmbuffree(struct mbuf *m)[m
+[32m+[m[32m{[m
+[32m+[m[32m  kfree(m);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Pushes an mbuf to the end of the queue.[m
+[32m+[m[32mvoid[m
+[32m+[m[32mmbufq_pushtail(struct mbufq *q, struct mbuf *m)[m
+[32m+[m[32m{[m
+[32m+[m[32m  m->next = 0;[m
+[32m+[m[32m  if (!q->head){[m
+[32m+[m[32m    q->head = q->tail = m;[m
+[32m+[m[32m    return;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  q->tail->next = m;[m
+[32m+[m[32m  q->tail = m;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Pops an mbuf from the start of the queue.[m
+[32m+[m[32mstruct mbuf *[m
+[32m+[m[32mmbufq_pophead(struct mbufq *q)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct mbuf *head = q->head;[m
+[32m+[m[32m  if (!head)[m
+[32m+[m[32m    return 0;[m
+[32m+[m[32m  q->head = head->next;[m
+[32m+[m[32m  return head;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Returns one (nonzero) if the queue is empty.[m
+[32m+[m[32mint[m
+[32m+[m[32mmbufq_empty(struct mbufq *q)[m
+[32m+[m[32m{[m
+[32m+[m[32m  return q->head == 0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Intializes a queue of mbufs.[m
+[32m+[m[32mvoid[m
+[32m+[m[32mmbufq_init(struct mbufq *q)[m
+[32m+[m[32m{[m
+[32m+[m[32m  q->head = 0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// This code is lifted from FreeBSD's ping.c, and is copyright by the Regents[m
+[32m+[m[32m// of the University of California.[m
+[32m+[m[32mstatic unsigned short[m
+[32m+[m[32min_cksum(const unsigned char *addr, int len)[m
+[32m+[m[32m{[m
+[32m+[m[32m  int nleft = len;[m
+[32m+[m[32m  const unsigned short *w = (const unsigned short *)addr;[m
+[32m+[m[32m  unsigned int sum = 0;[m
+[32m+[m[32m  unsigned short answer = 0;[m
+[32m+[m
+[32m+[m[32m  /*[m
+[32m+[m[32m   * Our algorithm is simple, using a 32 bit accumulator (sum), we add[m
+[32m+[m[32m   * sequential 16 bit words to it, and at the end, fold back all the[m
+[32m+[m[32m   * carry bits from the top 16 bits into the lower 16 bits.[m
+[32m+[m[32m   */[m
+[32m+[m[32m  while (nleft > 1)  {[m
+[32m+[m[32m    sum += *w++;[m
+[32m+[m[32m    nleft -= 2;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  /* mop up an odd byte, if necessary */[m
+[32m+[m[32m  if (nleft == 1) {[m
+[32m+[m[32m    *(unsigned char *)(&answer) = *(const unsigned char *)w;[m
+[32m+[m[32m    sum += answer;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  /* add back carry outs from top 16 bits to low 16 bits */[m
+[32m+[m[32m  sum = (sum & 0xffff) + (sum >> 16);[m
+[32m+[m[32m  sum += (sum >> 16);[m
+[32m+[m[32m  /* guaranteed now that the lower 16 bits of sum are correct */[m
+[32m+[m
+[32m+[m[32m  answer = ~sum; /* truncate to 16 bits */[m
+[32m+[m[32m  return answer;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// sends an ethernet packet[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mnet_tx_eth(struct mbuf *m, uint16 ethtype)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct eth *ethhdr;[m
+[32m+[m
+[32m+[m[32m  ethhdr = mbufpushhdr(m, *ethhdr);[m
+[32m+[m[32m  memmove(ethhdr->shost, local_mac, ETHADDR_LEN);[m
+[32m+[m[32m  // In a real networking stack, dhost would be set to the address discovered[m
+[32m+[m[32m  // through ARP. Because we don't support enough of the ARP protocol, set it[m
+[32m+[m[32m  // to broadcast instead.[m
+[32m+[m[32m  memmove(ethhdr->dhost, broadcast_mac, ETHADDR_LEN);[m
+[32m+[m[32m  ethhdr->type = htons(ethtype);[m
+[32m+[m[32m  if (e1000_transmit(m)) {[m
+[32m+[m[32m    mbuffree(m);[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// sends an IP packet[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mnet_tx_ip(struct mbuf *m, uint8 proto, uint32 dip)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct ip *iphdr;[m
+[32m+[m
+[32m+[m[32m  // push the IP header[m
+[32m+[m[32m  iphdr = mbufpushhdr(m, *iphdr);[m
+[32m+[m[32m  memset(iphdr, 0, sizeof(*iphdr));[m
+[32m+[m[32m  iphdr->ip_vhl = (4 << 4) | (20 >> 2);[m
+[32m+[m[32m  iphdr->ip_p = proto;[m
+[32m+[m[32m  iphdr->ip_src = htonl(local_ip);[m
+[32m+[m[32m  iphdr->ip_dst = htonl(dip);[m
+[32m+[m[32m  iphdr->ip_len = htons(m->len);[m
+[32m+[m[32m  iphdr->ip_ttl = 100;[m
+[32m+[m[32m  iphdr->ip_sum = in_cksum((unsigned char *)iphdr, sizeof(*iphdr));[m
+[32m+[m
+[32m+[m[32m  // now on to the ethernet layer[m
+[32m+[m[32m  net_tx_eth(m, ETHTYPE_IP);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// sends a UDP packet[m
+[32m+[m[32mvoid[m
+[32m+[m[32mnet_tx_udp(struct mbuf *m, uint32 dip,[m
+[32m+[m[32m           uint16 sport, uint16 dport)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct udp *udphdr;[m
+[32m+[m
+[32m+[m[32m  // put the UDP header[m
+[32m+[m[32m  udphdr = mbufpushhdr(m, *udphdr);[m
+[32m+[m[32m  udphdr->sport = htons(sport);[m
+[32m+[m[32m  udphdr->dport = htons(dport);[m
+[32m+[m[32m  udphdr->ulen = htons(m->len);[m
+[32m+[m[32m  udphdr->sum = 0; // zero means no checksum is provided[m
+[32m+[m
+[32m+[m[32m  // now on to the IP layer[m
+[32m+[m[32m  net_tx_ip(m, IPPROTO_UDP, dip);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// sends an ARP packet[m
+[32m+[m[32mstatic int[m
+[32m+[m[32mnet_tx_arp(uint16 op, uint8 dmac[ETHADDR_LEN], uint32 dip)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct mbuf *m;[m
+[32m+[m[32m  struct arp *arphdr;[m
+[32m+[m
+[32m+[m[32m  m = mbufalloc(MBUF_DEFAULT_HEADROOM);[m
+[32m+[m[32m  if (!m)[m
+[32m+[m[32m    return -1;[m
+[32m+[m
+[32m+[m[32m  // generic part of ARP header[m
+[32m+[m[32m  arphdr = mbufputhdr(m, *arphdr);[m
+[32m+[m[32m  arphdr->hrd = htons(ARP_HRD_ETHER);[m
+[32m+[m[32m  arphdr->pro = htons(ETHTYPE_IP);[m
+[32m+[m[32m  arphdr->hln = ETHADDR_LEN;[m
+[32m+[m[32m  arphdr->pln = sizeof(uint32);[m
+[32m+[m[32m  arphdr->op = htons(op);[m
+[32m+[m
+[32m+[m[32m  // ethernet + IP part of ARP header[m
+[32m+[m[32m  memmove(arphdr->sha, local_mac, ETHADDR_LEN);[m
+[32m+[m[32m  arphdr->sip = htonl(local_ip);[m
+[32m+[m[32m  memmove(arphdr->tha, dmac, ETHADDR_LEN);[m
+[32m+[m[32m  arphdr->tip = htonl(dip);[m
+[32m+[m
+[32m+[m[32m  // header is ready, send the packet[m
+[32m+[m[32m  net_tx_eth(m, ETHTYPE_ARP);[m
+[32m+[m[32m  return 0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// receives an ARP packet[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mnet_rx_arp(struct mbuf *m)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct arp *arphdr;[m
+[32m+[m[32m  uint8 smac[ETHADDR_LEN];[m
+[32m+[m[32m  uint32 sip, tip;[m
+[32m+[m
+[32m+[m[32m  arphdr = mbufpullhdr(m, *arphdr);[m
+[32m+[m[32m  if (!arphdr)[m
+[32m+[m[32m    goto done;[m
+[32m+[m
+[32m+[m[32m  // validate the ARP header[m
+[32m+[m[32m  if (ntohs(arphdr->hrd) != ARP_HRD_ETHER ||[m
+[32m+[m[32m      ntohs(arphdr->pro) != ETHTYPE_IP ||[m
+[32m+[m[32m      arphdr->hln != ETHADDR_LEN ||[m
+[32m+[m[32m      arphdr->pln != sizeof(uint32)) {[m
+[32m+[m[32m    goto done;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  // only requests are supported so far[m
+[32m+[m[32m  // check if our IP was solicited[m
+[32m+[m[32m  tip = ntohl(arphdr->tip); // target IP address[m
+[32m+[m[32m  if (ntohs(arphdr->op) != ARP_OP_REQUEST || tip != local_ip)[m
+[32m+[m[32m    goto done;[m
+[32m+[m
+[32m+[m[32m  // handle the ARP request[m
+[32m+[m[32m  memmove(smac, arphdr->sha, ETHADDR_LEN); // sender's ethernet address[m
+[32m+[m[32m  sip = ntohl(arphdr->sip); // sender's IP address (qemu's slirp)[m
+[32m+[m[32m  net_tx_arp(ARP_OP_REPLY, smac, sip);[m
+[32m+[m
+[32m+[m[32mdone:[m
+[32m+[m[32m  mbuffree(m);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// receives a UDP packet[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mnet_rx_udp(struct mbuf *m, uint16 len, struct ip *iphdr)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct udp *udphdr;[m
+[32m+[m[32m  uint32 sip;[m
+[32m+[m[32m  uint16 sport, dport;[m
+[32m+[m
+[32m+[m
+[32m+[m[32m  udphdr = mbufpullhdr(m, *udphdr);[m
+[32m+[m[32m  if (!udphdr)[m
+[32m+[m[32m    goto fail;[m
+[32m+[m
+[32m+[m[32m  // TODO: validate UDP checksum[m
+[32m+[m
+[32m+[m[32m  // validate lengths reported in headers[m
+[32m+[m[32m  if (ntohs(udphdr->ulen) != len)[m
+[32m+[m[32m    goto fail;[m
+[32m+[m[32m  len -= sizeof(*udphdr);[m
+[32m+[m[32m  if (len > m->len)[m
+[32m+[m[32m    goto fail;[m
+[32m+[m[32m  // minimum packet size could be larger than the payload[m
+[32m+[m[32m  mbuftrim(m, m->len - len);[m
+[32m+[m
+[32m+[m[32m  // parse the necessary fields[m
+[32m+[m[32m  sip = ntohl(iphdr->ip_src);[m
+[32m+[m[32m  sport = ntohs(udphdr->sport);[m
+[32m+[m[32m  dport = ntohs(udphdr->dport);[m
+[32m+[m[32m  sockrecvudp(m, sip, dport, sport);[m
+[32m+[m[32m  return;[m
+[32m+[m
+[32m+[m[32mfail:[m
+[32m+[m[32m  mbuffree(m);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// receives an IP packet[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mnet_rx_ip(struct mbuf *m)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct ip *iphdr;[m
+[32m+[m[32m  uint16 len;[m
+[32m+[m
+[32m+[m[32m  iphdr = mbufpullhdr(m, *iphdr);[m
+[32m+[m[32m  if (!iphdr)[m
+[32m+[m	[32m  goto fail;[m
+[32m+[m
+[32m+[m[32m  // check IP version and header len[m
+[32m+[m[32m  if (iphdr->ip_vhl != ((4 << 4) | (20 >> 2)))[m
+[32m+[m[32m    goto fail;[m
+[32m+[m[32m  // validate IP checksum[m
+[32m+[m[32m  if (in_cksum((unsigned char *)iphdr, sizeof(*iphdr)))[m
+[32m+[m[32m    goto fail;[m
+[32m+[m[32m  // can't support fragmented IP packets[m
+[32m+[m[32m  if (htons(iphdr->ip_off) != 0)[m
+[32m+[m[32m    goto fail;[m
+[32m+[m[32m  // is the packet addressed to us?[m
+[32m+[m[32m  if (htonl(iphdr->ip_dst) != local_ip)[m
+[32m+[m[32m    goto fail;[m
+[32m+[m[32m  // can only support UDP[m
+[32m+[m[32m  if (iphdr->ip_p != IPPROTO_UDP)[m
+[32m+[m[32m    goto fail;[m
+[32m+[m
+[32m+[m[32m  len = ntohs(iphdr->ip_len) - sizeof(*iphdr);[m
+[32m+[m[32m  net_rx_udp(m, len, iphdr);[m
+[32m+[m[32m  return;[m
+[32m+[m
+[32m+[m[32mfail:[m
+[32m+[m[32m  mbuffree(m);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// called by e1000 driver's interrupt handler to deliver a packet to the[m
+[32m+[m[32m// networking stack[m
+[32m+[m[32mvoid net_rx(struct mbuf *m)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct eth *ethhdr;[m
+[32m+[m[32m  uint16 type;[m
+[32m+[m
+[32m+[m[32m  ethhdr = mbufpullhdr(m, *ethhdr);[m
+[32m+[m[32m  if (!ethhdr) {[m
+[32m+[m[32m    mbuffree(m);[m
+[32m+[m[32m    return;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  type = ntohs(ethhdr->type);[m
+[32m+[m[32m  if (type == ETHTYPE_IP)[m
+[32m+[m[32m    net_rx_ip(m);[m
+[32m+[m[32m  else if (type == ETHTYPE_ARP)[m
+[32m+[m[32m    net_rx_arp(m);[m
+[32m+[m[32m  else[m
+[32m+[m[32m    mbuffree(m);[m
+[32m+[m[32m}[m
+[1mdiff --git a/kernel/net.h b/kernel/net.h[m
+[1mnew file mode 100644[m
+[1mindex 0000000..9e6fefe[m
+[1m--- /dev/null[m
+[1m+++ b/kernel/net.h[m
+[36m@@ -0,0 +1,173 @@[m
+[32m+[m[32m//[m
+[32m+[m[32m// packet buffer management[m
+[32m+[m[32m//[m
+[32m+[m
+[32m+[m[32m#define MBUF_SIZE              2048[m
+[32m+[m[32m#define MBUF_DEFAULT_HEADROOM  128[m
+[32m+[m
+[32m+[m[32mstruct mbuf {[m
+[32m+[m[32m  struct mbuf  *next; // the next mbuf in the chain[m
+[32m+[m[32m  char         *head; // the current start position of the buffer[m
+[32m+[m[32m  unsigned int len;   // the length of the buffer[m
+[32m+[m[32m  char         buf[MBUF_SIZE]; // the backing store[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mchar *mbufpull(struct mbuf *m, unsigned int len);[m
+[32m+[m[32mchar *mbufpush(struct mbuf *m, unsigned int len);[m
+[32m+[m[32mchar *mbufput(struct mbuf *m, unsigned int len);[m
+[32m+[m[32mchar *mbuftrim(struct mbuf *m, unsigned int len);[m
+[32m+[m
+[32m+[m[32m// The above functions manipulate the size and position of the buffer:[m
+[32m+[m[32m//            <- push            <- trim[m
+[32m+[m[32m//             -> pull            -> put[m
+[32m+[m[32m// [-headroom-][------buffer------][-tailroom-][m
+[32m+[m[32m// |----------------MBUF_SIZE-----------------|[m
+[32m+[m[32m//[m
+[32m+[m[32m// These marcos automatically typecast and determine the size of header structs.[m
+[32m+[m[32m// In most situations you should use these instead of the raw ops above.[m
+[32m+[m[32m#define mbufpullhdr(mbuf, hdr) (typeof(hdr)*)mbufpull(mbuf, sizeof(hdr))[m
+[32m+[m[32m#define mbufpushhdr(mbuf, hdr) (typeof(hdr)*)mbufpush(mbuf, sizeof(hdr))[m
+[32m+[m[32m#define mbufputhdr(mbuf, hdr) (typeof(hdr)*)mbufput(mbuf, sizeof(hdr))[m
+[32m+[m[32m#define mbuftrimhdr(mbuf, hdr) (typeof(hdr)*)mbuftrim(mbuf, sizeof(hdr))[m
+[32m+[m
+[32m+[m[32mstruct mbuf *mbufalloc(unsigned int headroom);[m
+[32m+[m[32mvoid mbuffree(struct mbuf *m);[m
+[32m+[m
+[32m+[m[32mstruct mbufq {[m
+[32m+[m[32m  struct mbuf *head;  // the first element in the queue[m
+[32m+[m[32m  struct mbuf *tail;  // the last element in the queue[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mvoid mbufq_pushtail(struct mbufq *q, struct mbuf *m);[m
+[32m+[m[32mstruct mbuf *mbufq_pophead(struct mbufq *q);[m
+[32m+[m[32mint mbufq_empty(struct mbufq *q);[m
+[32m+[m[32mvoid mbufq_init(struct mbufq *q);[m
+[32m+[m
+[32m+[m
+[32m+[m[32m//[m
+[32m+[m[32m// endianness support[m
+[32m+[m[32m//[m
+[32m+[m
+[32m+[m[32mstatic inline uint16 bswaps(uint16 val)[m
+[32m+[m[32m{[m
+[32m+[m[32m  return (((val & 0x00ffU) << 8) |[m
+[32m+[m[32m          ((val & 0xff00U) >> 8));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mstatic inline uint32 bswapl(uint32 val)[m
+[32m+[m[32m{[m
+[32m+[m[32m  return (((val & 0x000000ffUL) << 24) |[m
+[32m+[m[32m          ((val & 0x0000ff00UL) << 8) |[m
+[32m+[m[32m          ((val & 0x00ff0000UL) >> 8) |[m
+[32m+[m[32m          ((val & 0xff000000UL) >> 24));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Use these macros to convert network bytes to the native byte order.[m
+[32m+[m[32m// Note that Risc-V uses little endian while network order is big endian.[m
+[32m+[m[32m#define ntohs bswaps[m
+[32m+[m[32m#define ntohl bswapl[m
+[32m+[m[32m#define htons bswaps[m
+[32m+[m[32m#define htonl bswapl[m
+[32m+[m
+[32m+[m
+[32m+[m[32m//[m
+[32m+[m[32m// useful networking headers[m
+[32m+[m[32m//[m
+[32m+[m
+[32m+[m[32m#define ETHADDR_LEN 6[m
+[32m+[m
+[32m+[m[32m// an Ethernet packet header (start of the packet).[m
+[32m+[m[32mstruct eth {[m
+[32m+[m[32m  uint8  dhost[ETHADDR_LEN];[m
+[32m+[m[32m  uint8  shost[ETHADDR_LEN];[m
+[32m+[m[32m  uint16 type;[m
+[32m+[m[32m} __attribute__((packed));[m
+[32m+[m
+[32m+[m[32m#define ETHTYPE_IP  0x0800 // Internet protocol[m
+[32m+[m[32m#define ETHTYPE_ARP 0x0806 // Address resolution protocol[m
+[32m+[m
+[32m+[m[32m// an IP packet header (comes after an Ethernet header).[m
+[32m+[m[32mstruct ip {[m
+[32m+[m[32m  uint8  ip_vhl; // version << 4 | header length >> 2[m
+[32m+[m[32m  uint8  ip_tos; // type of service[m
+[32m+[m[32m  uint16 ip_len; // total length[m
+[32m+[m[32m  uint16 ip_id;  // identification[m
+[32m+[m[32m  uint16 ip_off; // fragment offset field[m
+[32m+[m[32m  uint8  ip_ttl; // time to live[m
+[32m+[m[32m  uint8  ip_p;   // protocol[m
+[32m+[m[32m  uint16 ip_sum; // checksum[m
+[32m+[m[32m  uint32 ip_src, ip_dst;[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32m#define IPPROTO_ICMP 1  // Control message protocol[m
+[32m+[m[32m#define IPPROTO_TCP  6  // Transmission control protocol[m
+[32m+[m[32m#define IPPROTO_UDP  17 // User datagram protocol[m
+[32m+[m
+[32m+[m[32m#define MAKE_IP_ADDR(a, b, c, d)           \[m
+[32m+[m[32m  (((uint32)a << 24) | ((uint32)b << 16) | \[m
+[32m+[m[32m   ((uint32)c << 8) | (uint32)d)[m
+[32m+[m
+[32m+[m[32m// a UDP packet header (comes after an IP header).[m
+[32m+[m[32mstruct udp {[m
+[32m+[m[32m  uint16 sport; // source port[m
+[32m+[m[32m  uint16 dport; // destination port[m
+[32m+[m[32m  uint16 ulen;  // length, including udp header, not including IP header[m
+[32m+[m[32m  uint16 sum;   // checksum[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32m// an ARP packet (comes after an Ethernet header).[m
+[32m+[m[32mstruct arp {[m
+[32m+[m[32m  uint16 hrd; // format of hardware address[m
+[32m+[m[32m  uint16 pro; // format of protocol address[m
+[32m+[m[32m  uint8  hln; // length of hardware address[m
+[32m+[m[32m  uint8  pln; // length of protocol address[m
+[32m+[m[32m  uint16 op;  // operation[m
+[32m+[m
+[32m+[m[32m  char   sha[ETHADDR_LEN]; // sender hardware address[m
+[32m+[m[32m  uint32 sip;              // sender IP address[m
+[32m+[m[32m  char   tha[ETHADDR_LEN]; // target hardware address[m
+[32m+[m[32m  uint32 tip;              // target IP address[m
+[32m+[m[32m} __attribute__((packed));[m
+[32m+[m
+[32m+[m[32m#define ARP_HRD_ETHER 1 // Ethernet[m
+[32m+[m
+[32m+[m[32menum {[m
+[32m+[m[32m  ARP_OP_REQUEST = 1, // requests hw addr given protocol addr[m
+[32m+[m[32m  ARP_OP_REPLY = 2,   // replies a hw addr given protocol addr[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32m// an DNS packet (comes after an UDP header).[m
+[32m+[m[32mstruct dns {[m
+[32m+[m[32m  uint16 id;  // request ID[m
+[32m+[m
+[32m+[m[32m  uint8 rd: 1;  // recursion desired[m
+[32m+[m[32m  uint8 tc: 1;  // truncated[m
+[32m+[m[32m  uint8 aa: 1;  // authoritive[m
+[32m+[m[32m  uint8 opcode: 4;[m[41m [m
+[32m+[m[32m  uint8 qr: 1;  // query/response[m
+[32m+[m[32m  uint8 rcode: 4; // response code[m
+[32m+[m[32m  uint8 cd: 1;  // checking disabled[m
+[32m+[m[32m  uint8 ad: 1;  // authenticated data[m
+[32m+[m[32m  uint8 z:  1;[m[41m  [m
+[32m+[m[32m  uint8 ra: 1;  // recursion available[m
+[32m+[m[41m  [m
+[32m+[m[32m  uint16 qdcount; // number of question entries[m
+[32m+[m[32m  uint16 ancount; // number of resource records in answer section[m
+[32m+[m[32m  uint16 nscount; // number of NS resource records in authority section[m
+[32m+[m[32m  uint16 arcount; // number of resource records in additional records[m
+[32m+[m[32m} __attribute__((packed));[m
+[32m+[m
+[32m+[m[32mstruct dns_question {[m
+[32m+[m[32m  uint16 qtype;[m
+[32m+[m[32m  uint16 qclass;[m
+[32m+[m[32m} __attribute__((packed));[m
+[32m+[m[41m  [m
+[32m+[m[32m#define ARECORD (0x0001)[m
+[32m+[m[32m#define QCLASS  (0x0001)[m
+[32m+[m
+[32m+[m[32mstruct dns_data {[m
+[32m+[m[32m  uint16 type;[m
+[32m+[m[32m  uint16 class;[m
+[32m+[m[32m  uint32 ttl;[m
+[32m+[m[32m  uint16 len;[m
+[32m+[m[32m} __attribute__((packed));[m
+[1mdiff --git a/kernel/pci.c b/kernel/pci.c[m
+[1mnew file mode 100644[m
+[1mindex 0000000..5cd2102[m
+[1m--- /dev/null[m
+[1m+++ b/kernel/pci.c[m
+[36m@@ -0,0 +1,61 @@[m
+[32m+[m[32m//[m
+[32m+[m[32m// simple PCI-Express initialization, only[m
+[32m+[m[32m// works for qemu and its e1000 card.[m
+[32m+[m[32m//[m
+[32m+[m
+[32m+[m[32m#include "types.h"[m
+[32m+[m[32m#include "param.h"[m
+[32m+[m[32m#include "memlayout.h"[m
+[32m+[m[32m#include "riscv.h"[m
+[32m+[m[32m#include "spinlock.h"[m
+[32m+[m[32m#include "proc.h"[m
+[32m+[m[32m#include "defs.h"[m
+[32m+[m
+[32m+[m[32mvoid[m
+[32m+[m[32mpci_init()[m
+[32m+[m[32m{[m
+[32m+[m[32m  // we'll place the e1000 registers at this address.[m
+[32m+[m[32m  // vm.c maps this range.[m
+[32m+[m[32m  uint64 e1000_regs = 0x40000000L;[m
+[32m+[m
+[32m+[m[32m  // qemu -machine virt puts PCIe config space here.[m
+[32m+[m[32m  // vm.c maps this range.[m
+[32m+[m[32m  uint32  *ecam = (uint32 *) 0x30000000L;[m
+[32m+[m[41m  [m
+[32m+[m[32m  // look at each possible PCI device on bus 0.[m
+[32m+[m[32m  for(int dev = 0; dev < 32; dev++){[m
+[32m+[m[32m    int bus = 0;[m
+[32m+[m[32m    int func = 0;[m
+[32m+[m[32m    int offset = 0;[m
+[32m+[m[32m    uint32 off = (bus << 16) | (dev << 11) | (func << 8) | (offset);[m
+[32m+[m[32m    volatile uint32 *base = ecam + off;[m
+[32m+[m[32m    uint32 id = base[0];[m
+[32m+[m[41m    [m
+[32m+[m[32m    // 100e:8086 is an e1000[m
+[32m+[m[32m    if(id == 0x100e8086){[m
+[32m+[m[32m      // command and status register.[m
+[32m+[m[32m      // bit 0 : I/O access enable[m
+[32m+[m[32m      // bit 1 : memory access enable[m
+[32m+[m[32m      // bit 2 : enable mastering[m
+[32m+[m[32m      base[1] = 7;[m
+[32m+[m[32m      __sync_synchronize();[m
+[32m+[m
+[32m+[m[32m      for(int i = 0; i < 6; i++){[m
+[32m+[m[32m        uint32 old = base[4+i];[m
+[32m+[m
+[32m+[m[32m        // writing all 1's to the BAR causes it to be[m
+[32m+[m[32m        // replaced with its size.[m
+[32m+[m[32m        base[4+i] = 0xffffffff;[m
+[32m+[m[32m        __sync_synchronize();[m
+[32m+[m
+[32m+[m[32m        base[4+i] = old;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      // tell the e1000 to reveal its registers at[m
+[32m+[m[32m      // physical address 0x40000000.[m
+[32m+[m[32m      base[4+0] = e1000_regs;[m
+[32m+[m
+[32m+[m[32m      e1000_init((uint32*)e1000_regs);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[1mdiff --git a/kernel/sysnet.c b/kernel/sysnet.c[m
+[1mnew file mode 100644[m
+[1mindex 0000000..1c48cb3[m
+[1m--- /dev/null[m
+[1m+++ b/kernel/sysnet.c[m
+[36m@@ -0,0 +1,185 @@[m
+[32m+[m[32m//[m
+[32m+[m[32m// network system calls.[m
+[32m+[m[32m//[m
+[32m+[m
+[32m+[m[32m#include "types.h"[m
+[32m+[m[32m#include "param.h"[m
+[32m+[m[32m#include "memlayout.h"[m
+[32m+[m[32m#include "riscv.h"[m
+[32m+[m[32m#include "spinlock.h"[m
+[32m+[m[32m#include "proc.h"[m
+[32m+[m[32m#include "defs.h"[m
+[32m+[m[32m#include "fs.h"[m
+[32m+[m[32m#include "sleeplock.h"[m
+[32m+[m[32m#include "file.h"[m
+[32m+[m[32m#include "net.h"[m
+[32m+[m
+[32m+[m[32mstruct sock {[m
+[32m+[m[32m  struct sock *next; // the next socket in the list[m
+[32m+[m[32m  uint32 raddr;      // the remote IPv4 address[m
+[32m+[m[32m  uint16 lport;      // the local UDP port number[m
+[32m+[m[32m  uint16 rport;      // the remote UDP port number[m
+[32m+[m[32m  struct spinlock lock; // protects the rxq[m
+[32m+[m[32m  struct mbufq rxq;  // a queue of packets waiting to be received[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mstatic struct spinlock lock;[m
+[32m+[m[32mstatic struct sock *sockets;[m
+[32m+[m
+[32m+[m[32mvoid[m
+[32m+[m[32msockinit(void)[m
+[32m+[m[32m{[m
+[32m+[m[32m  initlock(&lock, "socktbl");[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mint[m
+[32m+[m[32msockalloc(struct file **f, uint32 raddr, uint16 lport, uint16 rport)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct sock *si, *pos;[m
+[32m+[m
+[32m+[m[32m  si = 0;[m
+[32m+[m[32m  *f = 0;[m
+[32m+[m[32m  if ((*f = filealloc()) == 0)[m
+[32m+[m[32m    goto bad;[m
+[32m+[m[32m  if ((si = (struct sock*)kalloc()) == 0)[m
+[32m+[m[32m    goto bad;[m
+[32m+[m
+[32m+[m[32m  // initialize objects[m
+[32m+[m[32m  si->raddr = raddr;[m
+[32m+[m[32m  si->lport = lport;[m
+[32m+[m[32m  si->rport = rport;[m
+[32m+[m[32m  initlock(&si->lock, "sock");[m
+[32m+[m[32m  mbufq_init(&si->rxq);[m
+[32m+[m[32m  (*f)->type = FD_SOCK;[m
+[32m+[m[32m  (*f)->readable = 1;[m
+[32m+[m[32m  (*f)->writable = 1;[m
+[32m+[m[32m  (*f)->sock = si;[m
+[32m+[m
+[32m+[m[32m  // add to list of sockets[m
+[32m+[m[32m  acquire(&lock);[m
+[32m+[m[32m  pos = sockets;[m
+[32m+[m[32m  while (pos) {[m
+[32m+[m[32m    if (pos->raddr == raddr &&[m
+[32m+[m[32m        pos->lport == lport &&[m
+[32m+[m	[32mpos->rport == rport) {[m
+[32m+[m[32m      release(&lock);[m
+[32m+[m[32m      goto bad;[m
+[32m+[m[32m    }[m
+[32m+[m[32m    pos = pos->next;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  si->next = sockets;[m
+[32m+[m[32m  sockets = si;[m
+[32m+[m[32m  release(&lock);[m
+[32m+[m[32m  return 0;[m
+[32m+[m
+[32m+[m[32mbad:[m
+[32m+[m[32m  if (si)[m
+[32m+[m[32m    kfree((char*)si);[m
+[32m+[m[32m  if (*f)[m
+[32m+[m[32m    fileclose(*f);[m
+[32m+[m[32m  return -1;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mvoid[m
+[32m+[m[32msockclose(struct sock *si)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct sock **pos;[m
+[32m+[m[32m  struct mbuf *m;[m
+[32m+[m
+[32m+[m[32m  // remove from list of sockets[m
+[32m+[m[32m  acquire(&lock);[m
+[32m+[m[32m  pos = &sockets;[m
+[32m+[m[32m  while (*pos) {[m
+[32m+[m[32m    if (*pos == si){[m
+[32m+[m[32m      *pos = si->next;[m
+[32m+[m[32m      break;[m
+[32m+[m[32m    }[m
+[32m+[m[32m    pos = &(*pos)->next;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  release(&lock);[m
+[32m+[m
+[32m+[m[32m  // free any pending mbufs[m
+[32m+[m[32m  while (!mbufq_empty(&si->rxq)) {[m
+[32m+[m[32m    m = mbufq_pophead(&si->rxq);[m
+[32m+[m[32m    mbuffree(m);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  kfree((char*)si);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mint[m
+[32m+[m[32msockread(struct sock *si, uint64 addr, int n)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct proc *pr = myproc();[m
+[32m+[m[32m  struct mbuf *m;[m
+[32m+[m[32m  int len;[m
+[32m+[m
+[32m+[m[32m  acquire(&si->lock);[m
+[32m+[m[32m  while (mbufq_empty(&si->rxq) && !pr->killed) {[m
+[32m+[m[32m    sleep(&si->rxq, &si->lock);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if (pr->killed) {[m
+[32m+[m[32m    release(&si->lock);[m
+[32m+[m[32m    return -1;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  m = mbufq_pophead(&si->rxq);[m
+[32m+[m[32m  release(&si->lock);[m
+[32m+[m
+[32m+[m[32m  len = m->len;[m
+[32m+[m[32m  if (len > n)[m
+[32m+[m[32m    len = n;[m
+[32m+[m[32m  if (copyout(pr->pagetable, addr, m->head, len) == -1) {[m
+[32m+[m[32m    mbuffree(m);[m
+[32m+[m[32m    return -1;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  mbuffree(m);[m
+[32m+[m[32m  return len;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mint[m
+[32m+[m[32msockwrite(struct sock *si, uint64 addr, int n)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct proc *pr = myproc();[m
+[32m+[m[32m  struct mbuf *m;[m
+[32m+[m
+[32m+[m[32m  m = mbufalloc(MBUF_DEFAULT_HEADROOM);[m
+[32m+[m[32m  if (!m)[m
+[32m+[m[32m    return -1;[m
+[32m+[m
+[32m+[m[32m  if (copyin(pr->pagetable, mbufput(m, n), addr, n) == -1) {[m
+[32m+[m[32m    mbuffree(m);[m
+[32m+[m[32m    return -1;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  net_tx_udp(m, si->raddr, si->lport, si->rport);[m
+[32m+[m[32m  return n;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// called by protocol handler layer to deliver UDP packets[m
+[32m+[m[32mvoid[m
+[32m+[m[32msockrecvudp(struct mbuf *m, uint32 raddr, uint16 lport, uint16 rport)[m
+[32m+[m[32m{[m
+[32m+[m[32m  //[m
+[32m+[m[32m  // Find the socket that handles this mbuf and deliver it, waking[m
+[32m+[m[32m  // any sleeping reader. Free the mbuf if there are no sockets[m
+[32m+[m[32m  // registered to handle it.[m
+[32m+[m[32m  //[m
+[32m+[m[32m  struct sock *si;[m
+[32m+[m
+[32m+[m[32m  acquire(&lock);[m
+[32m+[m[32m  si = sockets;[m
+[32m+[m[32m  while (si) {[m
+[32m+[m[32m    if (si->raddr == raddr && si->lport == lport && si->rport == rport)[m
+[32m+[m[32m      goto found;[m
+[32m+[m[32m    si = si->next;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  release(&lock);[m
+[32m+[m[32m  mbuffree(m);[m
+[32m+[m[32m  return;[m
+[32m+[m
+[32m+[m[32mfound:[m
+[32m+[m[32m  acquire(&si->lock);[m
+[32m+[m[32m  mbufq_pushtail(&si->rxq, m);[m
+[32m+[m[32m  wakeup(&si->rxq);[m
+[32m+[m[32m  release(&si->lock);[m
+[32m+[m[32m  release(&lock);[m
+[32m+[m[32m}[m
+[1mdiff --git a/ping.py b/ping.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..eab10f8[m
+[1m--- /dev/null[m
+[1m+++ b/ping.py[m
+[36m@@ -0,0 +1,12 @@[m
+[32m+[m[32mimport socket[m
+[32m+[m[32mimport sys[m
+[32m+[m[32mimport time[m
+[32m+[m
+[32m+[m[32msock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)[m
+[32m+[m[32maddr = ('localhost', int(sys.argv[1]))[m
+[32m+[m[32mbuf = "this is a ping!".encode('utf-8')[m
+[32m+[m
+[32m+[m[32mwhile True:[m
+[32m+[m	[32mprint("pinging...", file=sys.stderr)[m
+[32m+[m	[32msock.sendto(buf, ("127.0.0.1", int(sys.argv[1])))[m
+[32m+[m	[32mtime.sleep(1)[m
+[1mdiff --git a/server.py b/server.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..2421c31[m
+[1m--- /dev/null[m
+[1m+++ b/server.py[m
+[36m@@ -0,0 +1,13 @@[m
+[32m+[m[32mimport socket[m
+[32m+[m[32mimport sys[m
+[32m+[m
+[32m+[m[32msock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)[m
+[32m+[m[32maddr = ('localhost', int(sys.argv[1]))[m
+[32m+[m[32mprint('listening on %s port %s' % addr, file=sys.stderr)[m
+[32m+[m[32msock.bind(addr)[m
+[32m+[m
+[32m+[m[32mwhile True:[m
+[32m+[m[32m    buf, raddr = sock.recvfrom(4096)[m
+[32m+[m[32m    print(buf.decode("utf-8"), file=sys.stderr)[m
+[32m+[m[32m    if buf:[m
+[32m+[m[32m        sent = sock.sendto(b'this is the host!', raddr)[m
+[1mdiff --git a/user/nettests.c b/user/nettests.c[m
+[1mnew file mode 100644[m
+[1mindex 0000000..2f7d6cd[m
+[1m--- /dev/null[m
+[1m+++ b/user/nettests.c[m
+[36m@@ -0,0 +1,297 @@[m
+[32m+[m[32m#include "kernel/types.h"[m
+[32m+[m[32m#include "kernel/net.h"[m
+[32m+[m[32m#include "kernel/stat.h"[m
+[32m+[m[32m#include "user/user.h"[m
+[32m+[m
+[32m+[m[32m//[m
+[32m+[m[32m// send a UDP packet to the localhost (outside of qemu),[m
+[32m+[m[32m// and receive a response.[m
+[32m+[m[32m//[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mping(uint16 sport, uint16 dport, int attempts)[m
+[32m+[m[32m{[m
+[32m+[m[32m  int fd;[m
+[32m+[m[32m  char *obuf = "a message from xv6!";[m
+[32m+[m[32m  uint32 dst;[m
+[32m+[m
+[32m+[m[32m  // 10.0.2.2, which qemu remaps to the external host,[m
+[32m+[m[32m  // i.e. the machine you're running qemu on.[m
+[32m+[m[32m  dst = (10 << 24) | (0 << 16) | (2 << 8) | (2 << 0);[m
+[32m+[m
+[32m+[m[32m  // you can send a UDP packet to any Internet address[m
+[32m+[m[32m  // by using a different dst.[m
+[32m+[m[41m  [m
+[32m+[m[32m  if((fd = connect(dst, sport, dport)) < 0){[m
+[32m+[m[32m    fprintf(2, "ping: connect() failed\n");[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  for(int i = 0; i < attempts; i++) {[m
+[32m+[m[32m    if(write(fd, obuf, strlen(obuf)) < 0){[m
+[32m+[m[32m      fprintf(2, "ping: send() failed\n");[m
+[32m+[m[32m      exit(1);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  char ibuf[128];[m
+[32m+[m[32m  int cc = read(fd, ibuf, sizeof(ibuf)-1);[m
+[32m+[m[32m  if(cc < 0){[m
+[32m+[m[32m    fprintf(2, "ping: recv() failed\n");[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  close(fd);[m
+[32m+[m[32m  ibuf[cc] = '\0';[m
+[32m+[m[32m  if(strcmp(ibuf, "this is the host!") != 0){[m
+[32m+[m[32m    fprintf(2, "ping didn't receive correct payload\n");[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Encode a DNS name[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mencode_qname(char *qn, char *host)[m
+[32m+[m[32m{[m
+[32m+[m[32m  char *l = host;[m[41m [m
+[32m+[m[41m  [m
+[32m+[m[32m  for(char *c = host; c < host+strlen(host)+1; c++) {[m
+[32m+[m[32m    if(*c == '.') {[m
+[32m+[m[32m      *qn++ = (char) (c-l);[m
+[32m+[m[32m      for(char *d = l; d < c; d++) {[m
+[32m+[m[32m        *qn++ = *d;[m
+[32m+[m[32m      }[m
+[32m+[m[32m      l = c+1; // skip .[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m[32m  *qn = '\0';[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Decode a DNS name[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mdecode_qname(char *qn, int max)[m
+[32m+[m[32m{[m
+[32m+[m[32m  char *qnMax = qn + max;[m
+[32m+[m[32m  while(1){[m
+[32m+[m[32m    if(qn >= qnMax){[m
+[32m+[m[32m      printf("invalid DNS reply\n");[m
+[32m+[m[32m      exit(1);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    int l = *qn;[m
+[32m+[m[32m    if(l == 0)[m
+[32m+[m[32m      break;[m
+[32m+[m[32m    for(int i = 0; i < l; i++) {[m
+[32m+[m[32m      *qn = *(qn+1);[m
+[32m+[m[32m      qn++;[m
+[32m+[m[32m    }[m
+[32m+[m[32m    *qn++ = '.';[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Make a DNS request[m
+[32m+[m[32mstatic int[m
+[32m+[m[32mdns_req(uint8 *obuf)[m
+[32m+[m[32m{[m
+[32m+[m[32m  int len = 0;[m
+[32m+[m[41m  [m
+[32m+[m[32m  struct dns *hdr = (struct dns *) obuf;[m
+[32m+[m[32m  hdr->id = htons(6828);[m
+[32m+[m[32m  hdr->rd = 1;[m
+[32m+[m[32m  hdr->qdcount = htons(1);[m
+[32m+[m[41m  [m
+[32m+[m[32m  len += sizeof(struct dns);[m
+[32m+[m[41m  [m
+[32m+[m[32m  // qname part of question[m
+[32m+[m[32m  char *qname = (char *) (obuf + sizeof(struct dns));[m
+[32m+[m[32m  char *s = "pdos.csail.mit.edu.";[m
+[32m+[m[32m  encode_qname(qname, s);[m
+[32m+[m[32m  len += strlen(qname) + 1;[m
+[32m+[m
+[32m+[m[32m  // constants part of question[m
+[32m+[m[32m  struct dns_question *h = (struct dns_question *) (qname+strlen(qname)+1);[m
+[32m+[m[32m  h->qtype = htons(0x1);[m
+[32m+[m[32m  h->qclass = htons(0x1);[m
+[32m+[m
+[32m+[m[32m  len += sizeof(struct dns_question);[m
+[32m+[m[32m  return len;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Process DNS response[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mdns_rep(uint8 *ibuf, int cc)[m
+[32m+[m[32m{[m
+[32m+[m[32m  struct dns *hdr = (struct dns *) ibuf;[m
+[32m+[m[32m  int len;[m
+[32m+[m[32m  char *qname = 0;[m
+[32m+[m[32m  int record = 0;[m
+[32m+[m
+[32m+[m[32m  if(cc < sizeof(struct dns)){[m
+[32m+[m[32m    printf("DNS reply too short\n");[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if(!hdr->qr) {[m
+[32m+[m[32m    printf("Not a DNS reply for %d\n", ntohs(hdr->id));[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if(hdr->id != htons(6828)){[m
+[32m+[m[32m    printf("DNS wrong id: %d\n", ntohs(hdr->id));[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m[41m  [m
+[32m+[m[32m  if(hdr->rcode != 0) {[m
+[32m+[m[32m    printf("DNS rcode error: %x\n", hdr->rcode);[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m[41m  [m
+[32m+[m[32m  //printf("qdcount: %x\n", ntohs(hdr->qdcount));[m
+[32m+[m[32m  //printf("ancount: %x\n", ntohs(hdr->ancount));[m
+[32m+[m[32m  //printf("nscount: %x\n", ntohs(hdr->nscount));[m
+[32m+[m[32m  //printf("arcount: %x\n", ntohs(hdr->arcount));[m
+[32m+[m[41m  [m
+[32m+[m[32m  len = sizeof(struct dns);[m
+[32m+[m
+[32m+[m[32m  for(int i =0; i < ntohs(hdr->qdcount); i++) {[m
+[32m+[m[32m    char *qn = (char *) (ibuf+len);[m
+[32m+[m[32m    qname = qn;[m
+[32m+[m[32m    decode_qname(qn, cc - len);[m
+[32m+[m[32m    len += strlen(qn)+1;[m
+[32m+[m[32m    len += sizeof(struct dns_question);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  for(int i = 0; i < ntohs(hdr->ancount); i++) {[m
+[32m+[m[32m    if(len >= cc){[m
+[32m+[m[32m      printf("invalid DNS reply\n");[m
+[32m+[m[32m      exit(1);[m
+[32m+[m[32m    }[m
+[32m+[m[41m    [m
+[32m+[m[32m    char *qn = (char *) (ibuf+len);[m
+[32m+[m
+[32m+[m[32m    if((int) qn[0] > 63) {  // compression?[m
+[32m+[m[32m      qn = (char *)(ibuf+qn[1]);[m
+[32m+[m[32m      len += 2;[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m      decode_qname(qn, cc - len);[m
+[32m+[m[32m      len += strlen(qn)+1;[m
+[32m+[m[32m    }[m
+[32m+[m[41m      [m
+[32m+[m[32m    struct dns_data *d = (struct dns_data *) (ibuf+len);[m
+[32m+[m[32m    len += sizeof(struct dns_data);[m
+[32m+[m[32m    //printf("type %d ttl %d len %d\n", ntohs(d->type), ntohl(d->ttl), ntohs(d->len));[m
+[32m+[m[32m    if(ntohs(d->type) == ARECORD && ntohs(d->len) == 4) {[m
+[32m+[m[32m      record = 1;[m
+[32m+[m[32m      printf("DNS arecord for %s is ", qname ? qname : "" );[m
+[32m+[m[32m      uint8 *ip = (ibuf+len);[m
+[32m+[m[32m      printf("%d.%d.%d.%d\n", ip[0], ip[1], ip[2], ip[3]);[m
+[32m+[m[32m      if(ip[0] != 128 || ip[1] != 52 || ip[2] != 129 || ip[3] != 126) {[m
+[32m+[m[32m        printf("wrong ip address");[m
+[32m+[m[32m        exit(1);[m
+[32m+[m[32m      }[m
+[32m+[m[32m      len += 4;[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  // needed for DNS servers with EDNS support[m
+[32m+[m[32m  for(int i = 0; i < ntohs(hdr->arcount); i++) {[m
+[32m+[m[32m    char *qn = (char *) (ibuf+len);[m
+[32m+[m[32m    if(*qn != 0) {[m
+[32m+[m[32m      printf("invalid name for EDNS\n");[m
+[32m+[m[32m      exit(1);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    len += 1;[m
+[32m+[m
+[32m+[m[32m    struct dns_data *d = (struct dns_data *) (ibuf+len);[m
+[32m+[m[32m    len += sizeof(struct dns_data);[m
+[32m+[m[32m    if(ntohs(d->type) != 41) {[m
+[32m+[m[32m      printf("invalid type for EDNS\n");[m
+[32m+[m[32m      exit(1);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    len += ntohs(d->len);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if(len != cc) {[m
+[32m+[m[32m    printf("Processed %d data bytes but received %d\n", len, cc);[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if(!record) {[m
+[32m+[m[32m    printf("Didn't receive an arecord\n");[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mstatic void[m
+[32m+[m[32mdns()[m
+[32m+[m[32m{[m
+[32m+[m[32m  #define N 1000[m
+[32m+[m[32m  uint8 obuf[N];[m
+[32m+[m[32m  uint8 ibuf[N];[m
+[32m+[m[32m  uint32 dst;[m
+[32m+[m[32m  int fd;[m
+[32m+[m[32m  int len;[m
+[32m+[m
+[32m+[m[32m  memset(obuf, 0, N);[m
+[32m+[m[32m  memset(ibuf, 0, N);[m
+[32m+[m[41m  [m
+[32m+[m[32m  // 8.8.8.8: google's name server[m
+[32m+[m[32m  dst = (8 << 24) | (8 << 16) | (8 << 8) | (8 << 0);[m
+[32m+[m
+[32m+[m[32m  if((fd = connect(dst, 10000, 53)) < 0){[m
+[32m+[m[32m    fprintf(2, "ping: connect() failed\n");[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  len = dns_req(obuf);[m
+[32m+[m[41m  [m
+[32m+[m[32m  if(write(fd, obuf, len) < 0){[m
+[32m+[m[32m    fprintf(2, "dns: send() failed\n");[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  int cc = read(fd, ibuf, sizeof(ibuf));[m
+[32m+[m[32m  if(cc < 0){[m
+[32m+[m[32m    fprintf(2, "dns: recv() failed\n");[m
+[32m+[m[32m    exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  dns_rep(ibuf, cc);[m
+[32m+[m
+[32m+[m[32m  close(fd);[m
+[32m+[m[32m}[m[41m  [m
+[32m+[m
+[32m+[m[32mint[m
+[32m+[m[32mmain(int argc, char *argv[])[m
+[32m+[m[32m{[m
+[32m+[m[32m  int i, ret;[m
+[32m+[m[32m  uint16 dport = NET_TESTS_PORT;[m
+[32m+[m
+[32m+[m[32m  printf("nettests running on port %d\n", dport);[m
+[32m+[m[41m  [m
+[32m+[m[32m  printf("testing ping: ");[m
+[32m+[m[32m  ping(2000, dport, 1);[m
+[32m+[m[32m  printf("OK\n");[m
+[32m+[m[41m  [m
+[32m+[m[32m  printf("testing single-process pings: ");[m
+[32m+[m[32m  for (i = 0; i < 100; i++)[m
+[32m+[m[32m    ping(2000, dport, 1);[m
+[32m+[m[32m  printf("OK\n");[m
+[32m+[m[41m  [m
+[32m+[m[32m  printf("testing multi-process pings: ");[m
+[32m+[m[32m  for (i = 0; i < 10; i++){[m
+[32m+[m[32m    int pid = fork();[m
+[32m+[m[32m    if (pid == 0){[m
+[32m+[m[32m      ping(2000 + i + 1, dport, 1);[m
+[32m+[m[32m      exit(0);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m[32m  for (i = 0; i < 10; i++){[m
+[32m+[m[32m    wait(&ret);[m
+[32m+[m[32m    if (ret != 0)[m
+[32m+[m[32m      exit(1);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  printf("OK\n");[m
+[32m+[m[41m  [m
+[32m+[m[32m  printf("testing DNS\n");[m
+[32m+[m[32m  dns();[m
+[32m+[m[32m  printf("DNS OK\n");[m
+[32m+[m[41m  [m
+[32m+[m[32m  printf("all tests passed.\n");[m
+[32m+[m[32m  exit(0);[m
+[32m+[m[32m}[m
+[1mdiff --git a/user/pingpong.c b/user/pingpong.c[m
+[1mnew file mode 100644[m
+[1mindex 0000000..6ed12e7[m
+[1m--- /dev/null[m
+[1m+++ b/user/pingpong.c[m
+[36m@@ -0,0 +1,52 @@[m
+[32m+[m[32m#include "kernel/types.h"[m
+[32m+[m[32m#include "kernel/stat.h"[m
+[32m+[m[32m#include "user/user.h"[m
+[32m+[m
+[32m+[m[32m#define N 5[m
+[32m+[m[32mchar buf[N];[m
+[32m+[m
+[32m+[m[32mvoid[m
+[32m+[m[32mpong(int *parent_to_child, int *child_to_parent) {[m
+[32m+[m[32m  if (read(parent_to_child[0], buf, N) < 0) {[m
+[32m+[m[32m    printf("read failed\n");[m
+[32m+[m[32m  }[m
+[32m+[m[32m  printf("%d: received %s\n", getpid(), buf);[m
+[32m+[m[32m  if (write(child_to_parent[1], "pong", 4) != 4) {[m
+[32m+[m[32m    printf("write failed\n");[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mvoid[m
+[32m+[m[32mping(int *parent_to_child, int *child_to_parent) {[m
+[32m+[m[41m  [m
+[32m+[m[32m  if (write(parent_to_child[1], "ping", 4) != 4) {[m
+[32m+[m[32m    printf("write failed\n");[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if (read(child_to_parent[0], buf, N) < 0) {[m
+[32m+[m[32m    printf("read failed\n");[m
+[32m+[m[32m  }[m
+[32m+[m[32m  printf("%d: received %s\n", getpid(), buf);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mint[m
+[32m+[m[32mmain(int argc, char *argv[])[m
+[32m+[m[32m{[m
+[32m+[m[32m  int parent_to_child[2];[m
+[32m+[m[32m  int child_to_parent[2];[m
+[32m+[m
+[32m+[m[32m  int pid;[m
+[32m+[m
+[32m+[m[32m  if (pipe(parent_to_child) < 0 || pipe(child_to_parent) < 0) {[m
+[32m+[m[32m    printf("pipe failed\n");[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if ((pid = fork()) < 0) {[m
+[32m+[m[32m    printf("fork failed\n");[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if (pid == 0) {[m
+[32m+[m[32m    pong(parent_to_child, child_to_parent);[m
+[32m+[m[32m  } else {[m
+[32m+[m[32m    ping(parent_to_child, child_to_parent);[m
+[32m+[m[32m  }[m
+[32m+[m[41m  [m
+[32m+[m[32m  exit(0);[m
+[32m+[m[32m}[m
