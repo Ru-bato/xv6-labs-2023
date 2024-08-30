@@ -30,7 +30,7 @@ def test_symlinktest_symlinks():
 @test(19, "usertests")
 def test_usertests():
     r.run_qemu(shell_script([
-        'usertests -q'
+        'usertests'
     ]), timeout=360)
     r.match('^ALL TESTS PASSED$')
 
